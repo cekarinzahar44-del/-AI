@@ -1,15 +1,19 @@
 {
   "name": "home-chef-gigachat",
   "version": "1.0.0",
+  "description": "AI Chef Bot using GigaChat",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
   },
   "dependencies": {
     "telegraf": "^4.16.3",
     "gigachat": "^1.0.0",
-    "express": "^4.18.2",
     "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   },
   "engines": {
     "node": ">=18.0.0"
