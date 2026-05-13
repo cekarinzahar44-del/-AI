@@ -1,3 +1,5 @@
+// 🔓 ОТКЛЮЧАЕМ ПРОВЕРКУ SSL СЕРТИФИКАТОВ (ФИКС ДЛЯ ХОСТИНГА)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const http = require('http'); // ВНИМАНИЕ: Здесь HTTP, а не express!
