@@ -12,17 +12,63 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
     console.log('✅ Bot module loaded');
 
+    // ===== БАЗА ИЗВЕСТНЫХ БЛЮД =====
+    const knownDishes = [
+        'паста карбонара', 'карбонара', 'спагетти карбонара',
+        'борщ', 'красный борщ', 'украинский борщ',
+        'пицца', 'пицца маргарита', 'пицца пепперони',
+        'салат цезарь', 'цезарь',
+        'пельмени', 'вареники',
+        'блины', 'блинчики',
+        'оливье', 'салат оливье',
+        'гречка', 'гречневая каша',
+        'плов', 'узбекский плов',
+        'котлеты', 'мясные котлеты',
+        'суп', 'куриный суп', 'гороховый суп',
+        'омлет', 'яичница',
+        'паста болоньезе', 'болоньезе', 'спагетти болоньезе',
+        'лазанья',
+        'суши', 'роллы',
+        'бургер', 'гамбургер',
+        'шашлык',
+        'торт', 'медовик', 'наполеон',
+        'печенье', 'пряники'
+    ];
+
+    // ===== ОПРЕДЕЛЕНИЕ ТИПА ЗАПРОСА =====
+    function detectQueryType(text) {
+        const lowerText = text.toLowerCase().trim();
+        
+        // Проверяем на конкретное блюдо
+        for (const dish of knownDishes) {
+            if (lowerText.includes(dish)) {
+                return { type: 'dish', dish: dish };
+            }
+        }
+        
+        // Проверяем на ключевые слова рецепта
+        if (lowerText.includes('рецепт') ||             lowerText.includes('приготовить') || 
+            lowerText.includes('как сделать') ||
+            lowerText.includes('как приготовить')) {
+            
+            // Извлекаем название блюда после ключевого слова
+            const match = lowerText.match(/(?:рецепт|приготовить|сделать)\s+(.+)/i);
+            if (match && match[1]) {
+                return { type: 'dish', dish: match[1].trim() };
+            }
+        }
+        
+        // Если просто перечисление продуктов
+        return { type: 'ingredients', ingredients: text };
+    }
+
     // ===== ОЧИСТКА НАЗВАНИЯ =====
     function cleanDishName(name) {
         return name
             .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
             .replace(/[\u{2600}-\u{26FF}]/gu, '')
             .replace(/[\u{2700}-\u{27BF}]/gu, '')
-            .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
-            .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
-            .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')
             .replace(/[\*\_\`\[\]]/g, '')
-            .replace(/[✨⭐🍽️🥘🍲🧄🌶️🍅🍚✅⚠️️📊🔍📸]/g, '')
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -32,9 +78,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
         try {
             const PEXELS_KEY = process.env.PEXELS_API_KEY;
             
-            if (!PEXELS_KEY || PEXELS_KEY === 'your_pexels_api_key_here') {
-                return null;
-            }
+            if (!PEXELS_KEY) return null;
             
             const cleanName = cleanDishName(dishName);
             console.log(`🔍 Searching: "${cleanName}"`);
@@ -47,12 +91,12 @@ module.exports = (bot, pool, ADMIN_ID) => {
                     headers: { 'Authorization': PEXELS_KEY, 'User-Agent': 'HomeChefBot/1.0' },
                     timeout: 5000
                 }
-            );            
+            );
+            
             if (res.data.photos && res.data.photos.length > 0) {
                 return res.data.photos[0].src.large;
             }
-            
-            return null;
+                        return null;
         } catch (err) {
             console.error('Pexels error:', err.message);
             return null;
@@ -67,13 +111,13 @@ module.exports = (bot, pool, ADMIN_ID) => {
             'паста': 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=600',
             'спагетти': 'https://images.pexels.com/photos/2069355/pexels-photo-2069355.jpeg?auto=compress&cs=tinysrgb&w=600',
             'карбонара': 'https://images.pexels.com/photos/1633571/pexels-photo-1633571.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'болоньеза': 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'борщ': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'пицц': 'https://images.pexels.com/photos/846175/pexels-photo-846175.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'салат': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'суп': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
             'куриц': 'https://images.pexels.com/photos/2871757/pexels-photo-2871757.jpeg?auto=compress&cs=tinysrgb&w=600',
             'мяс': 'https://images.pexels.com/photos/1600412/pexels-photo-1600412.jpeg?auto=compress&cs=tinysrgb&w=600',
             'рыб': 'https://images.pexels.com/photos/1267320/pexels-photo-1267320.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'суп': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'салат': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'пицц': 'https://images.pexels.com/photos/846175/pexels-photo-846175.jpeg?auto=compress&cs=tinysrgb&w=600',
             'десерт': 'https://images.pexels.com/photos/1558616/pexels-photo-1558616.jpeg?auto=compress&cs=tinysrgb&w=600',
             'торт': 'https://images.pexels.com/photos/1920173/pexels-photo-1920173.jpeg?auto=compress&cs=tinysrgb&w=600',
             'яиц': 'https://images.pexels.com/photos/162710/pexels-photo-162710.jpeg?auto=compress&cs=tinysrgb&w=600',
@@ -95,13 +139,12 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 await ctx.replyWithPhoto(photoUrl, { caption, parse_mode: 'HTML' });
                 return true;
             } catch (err) {
-                console.error(`Photo attempt ${i + 1} failed:`, err.message);
-                if (i === maxRetries - 1) return false;                await new Promise(resolve => setTimeout(resolve, 1000));
+                if (i === maxRetries - 1) return false;
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
         return false;
     }
-
     // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
     async function getUser(tgId) {
         const { rows } = await pool.query('SELECT * FROM users WHERE tg_id = $1', [tgId]);
@@ -145,20 +188,20 @@ module.exports = (bot, pool, ADMIN_ID) => {
         if (ctx.from.id === ADMIN_ID) return;
 
         const tgId = ctx.from.id;
-        await createUser(tgId, ctx.from.username, ctx.from.first_name);        
+        await createUser(tgId, ctx.from.username, ctx.from.first_name);
+        
         const sub = await getSubscription(tgId);
         let msg = '👋 Привет! Я Домашний Шеф 🍳\n\n';
-        msg += '🎯 Напиши продукты, которые есть дома,\n';
-        msg += 'и я создам для тебя шикарный рецепт! 😋\n\n';
-        msg += `🎁 ${FREE_LIMIT} бесплатных рецепта\n`;
-        msg += `📸 Каждый рецепт с красивым фото!\n\n`;
+        msg += '🎯 Я могу:\n';
+        msg += '1️⃣ Найти рецепт конкретного блюда (например: "паста карбонара")\n';
+        msg += '2️⃣ Придумать рецепт из твоих продуктов (например: "яйца помидоры бекон")\n\n';        msg += `🎁 ${FREE_LIMIT} бесплатных рецептов\n`;
+        msg += `📸 Каждый рецепт с фото!\n\n`;
         
         if (sub) {
             const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
             msg += `✅ PRO Подписка активна!\n`;
             msg += `📅 До: ${new Date(sub.expires_at).toLocaleDateString('ru-RU')}\n`;
-            msg += `⏳ Осталось дней: ${daysLeft}\n`;
-            msg += `🌟 Неограниченные рецепты!`;
+            msg += `⏳ Осталось дней: ${daysLeft}`;
         } else {
             const freeUsed = await getFreeRecipesUsed(tgId);
             msg += `📊 Использовано: ${freeUsed} из ${FREE_LIMIT}`;
@@ -167,7 +210,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
         ctx.reply(msg);
     });
 
-    // ===== ЗАПРОС РЕЦЕПТА =====
+    // ===== ОБРАБОТКА ЗАПРОСОВ =====
     bot.on('text', async (ctx) => {
         const text = ctx.message.text.trim();
         const tgId = ctx.from.id;
@@ -187,27 +230,33 @@ module.exports = (bot, pool, ADMIN_ID) => {
             return ctx.reply(
                 `🔒 Лимит исчерпан!\n\n` +
                 `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
-                `🌟 PRO Подписка — ${SUB_PRICE}₽/месяц\n` +
-                `✅ Неограниченные рецепты\n📸 Красивые фото блюд`,
+                `🌟 PRO Подписка — ${SUB_PRICE}₽/месяц`,
                 { 
                     reply_markup: Markup.inlineKeyboard([
                         Markup.button.callback('💳 Оформить подписку', 'pay_subscribe')
                     ])
                 }
-            );        }
+            );
+        }
         
-        const loadingMsg = await ctx.reply('👨‍🍳 Создаю рецепт...\n✨ Подбираю идеальное сочетание');
+        // Определяем тип запроса
+        const query = detectQueryType(text);
         
-        try {
-            // ===== ИДЕАЛЬНЫЙ ПРОМПТ =====
-            const response = await giga.chat({
-                model: 'GigaChat',
-                messages: [
-                    { 
-                        role: 'system', 
-                        content: `Ты — профессиональный шеф-повар. Создаёшь рецепты БЕЗ markdown (без **), только текст с эмодзи.
+        let loadingMsg, recipe, dishName;
+                try {
+            if (query.type === 'dish') {
+                // ===== РЕЖИМ 1: КОНКРЕТНОЕ БЛЮДО =====
+                dishName = query.dish;
+                loadingMsg = await ctx.reply(`🍽️ Ищу рецепт: ${dishName}...\n⏱ 1-2 минуты`);
+                
+                const response = await giga.chat({
+                    model: 'GigaChat',
+                    messages: [
+                        { 
+                            role: 'system', 
+                            content: `Ты — профессиональный шеф-повар. Создаёшь ПОДРОБНЫЕ рецепты известных блюд.
 
-СТРОГАЯ СТРУКТУРА:
+СТРУКТУРА:
 
 🍽️ НАЗВАНИЕ БЛЮДА (флаг страны) ✨
 
@@ -217,87 +266,138 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
 🍜 ингредиент — количество (пояснение)
 🥚 ингредиент — количество (пояснение)
-🧀 ингредиент — количество (пояснение)
 
 
 👨‍🍳 ШАГИ ПРИГОТОВЛЕНИЯ:
 
 1️⃣ Название шага 🔪 (3-5 минут)
-Эмоциональное описание этапа! 😋
-- Подробное действие с деталями 📏
+Описание этапа! 😋
+- Подробное действие 📏
 - Важные нюансы 💡
-- На что обратить внимание ⚠️
 
 2️⃣ Название шага 🔥 (5-7 минут)
 Почему это важно! 🤤
 - Действие 1 ✨
 - Действие 2 
-- Предупреждение ️
 
-3️ Название шага  (7-10 минут)
-Продолжай в том же духе...
-(минимум 4-6 шагов с ТОЧНЫМ временем!)
+(минимум 5-6 шагов с ТОЧНЫМ временем!)
 
 
 🎯 СОВЕТЫ ШЕФА:
-💡 Полезный совет 1
-💡 Полезный совет 2
-💡 Полезный совет 3
-💡 Полезный совет 4
+💡 Совет 1
+💡 Совет 2
+💡 Совет 3
+
 
 📊 ПИЩЕВАЯ ЦЕННОСТЬ (на порцию):
 🔥 Калории: ~X ккал
 🥩 Белки: X г
-🌾 Углеводы: X г
-🧈 Жиры: X г
+🌾 Углеводы: X г🧈 Жиры: X г
 
-🍷 ИДЕАЛЬНАЯ ПАРА: описание напитка
+🍷 ИДЕАЛЬНАЯ ПАРА: напиток
 
 ⏱ ОБЩЕЕ ВРЕМЯ: X минут
-📊 СЛОЖНОСТЬ: ⭐⭐☆☆☆ (Легко/Средняя/Сложная)
+📊 СЛОЖНОСТЬ: ⭐⭐☆☆☆
 👥 ПОРЦИЙ: X персоны
 
 
 ВАЖНО:
-1. НИКАКИХ ** (звёздочек для жирного)!
-2. Каждому шагу ТОЧНОЕ время в скобках!
-3. Много эмодзи в каждом разделе
-4. Конкретные количества (граммы, штуки)
-5. Пояснения в скобках
-6. Живой, эмоциональный язык
-7. Профессиональные советы`
-                    },
-                    { 
-                        role: 'user', 
-                        content: `Создай рецепт из: ${text}
+- НИКАКИХ ** (звёздочек)!
+- ТОЧНОЕ время для каждого шага
+- Много эмодзи
+- Конкретные количества`
+                        },
+                        { 
+                            role: 'user', 
+                            content: `Дай классический рецепт: ${dishName}` 
+                        }
+                    ],
+                    max_tokens: 2000,
+                    temperature: 0.85
+                });
+                
+                recipe = response.choices[0].message.content;
+                
+            } else {
+                // ===== РЕЖИМ 2: ИЗ ПРОДУКТОВ =====
+                dishName = 'Блюдо из твоих продуктов';
+                loadingMsg = await ctx.reply(`🛒 Создаю рецепт из: ${text}...\n✨ Магия начинается!`);
+                
+                const response = await giga.chat({
+                    model: 'GigaChat',
+                    messages: [
+                        { 
+                            role: 'system', 
+                            content: `Ты — креативный шеф-повар. Создаёшь рецепты ТОЛЬКО из указанных продуктов.
 
-Оформи КРАСИВО, с ТОЧНЫМ временем для каждого шага! Без markdown!` 
-                    }
-                ],
-                max_tokens: 2000,
-                temperature: 0.85
-            });
-            
-            let recipe = response.choices[0].message.content;
-            
-            // Извлекаем название
-            let dishName = 'Блюдо';
-            const nameMatch = recipe.match(/🍽️\s*([^\n]+)/);
-            if (nameMatch && nameMatch[1]) {
-                dishName = cleanDishName(nameMatch[1]);
+ПРАВИЛА:
+1. Используй ТОЛЬКО перечисленные продукты (можно базовые: соль, перец, масло)
+2. Не добавляй ингредиенты, которых нет в списке
+3. Если продуктов мало — предложи простое блюдо
+
+СТРУКТУРА:
+
+🍽️ НАЗВАНИЕ БЛЮДА ✨
+
+Описание (почему это вкусно!) 💖
+
+🛒 ТВОИ ПРОДУКТЫ:
+🍜 продукт 1 — количество
+🥚 продукт 2 — количество
+
+
+👨‍ ПРИГОТОВЛЕНИЕ:
+
+1️⃣ Название шага 🔪 (X минут)
+- Что делаем 📏
+- Детали 💡
+
+2️⃣ Название шага 🔥 (X минут)
+- Продолжаем ✨
+
+(4-5 шагов с временем!)
+
+
+🎯 СОВЕТЫ:
+💡 Совет 1
+💡 Совет 2
+
+
+📊 ПИЩЕВАЯ ЦЕННОСТЬ:
+🔥 Калории: ~X ккал
+
+⏱ ВРЕМЯ: X минут
+📊 СЛОЖНОСТЬ: ⭐⭐☆☆☆
+👥 ПОРЦИЙ: X
+
+
+ВАЖНО:
+- ТОЛЬКО указанные продукты!
+- Без звёздочек **
+- Время для каждого шага`
+                        },
+                        { 
+                            role: 'user', 
+                            content: `Придумай рецепт из этих продуктов: ${text}. Используй только их (можно соль, перец, масло)!` 
+                        }
+                    ],
+                    max_tokens: 1800,
+                    temperature: 0.9
+                });
+                
+                recipe = response.choices[0].message.content;
             }
             
             try {
                 await ctx.deleteMessage(loadingMsg.message_id);
-            } catch (e) {}
-            
+            } catch (e) {}            
             // Отправляем рецепт
-            await ctx.reply(recipe);            
+            await ctx.reply(recipe);
+            
             // Ищем фото
-            const photoMsg = await ctx.reply('📸 Подбираю фото блюда...');
+            const photoMsg = await ctx.reply('📸 Подбираю фото...');
             
             let photoUrl = await searchFoodPhoto(dishName);
-            if (!photoUrl) photoUrl = await searchFoodPhoto(text);
             if (!photoUrl) photoUrl = getFallbackPhoto(dishName);
             
             try {
@@ -305,11 +405,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
             } catch (e) {}
             
             const caption = `📸 ${dishName}\nПриятного аппетита! 😋`;
-            const sent = await sendPhotoWithRetry(ctx, photoUrl, caption);
-            
-            if (!sent) {
-                await ctx.reply('📸 Фото не загрузилось, но рецепт отличный! 😊');
-            }
+            await sendPhotoWithRetry(ctx, photoUrl, caption);
             
             // Считаем рецепты
             if (!hasSub) {
@@ -321,7 +417,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
             }
             
         } catch (e) {
-            console.error('GigaChat error:', e);
+            console.error('Error:', e);
             try {
                 await ctx.deleteMessage(loadingMsg.message_id);
             } catch (err) {}
@@ -341,8 +437,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
             `1️⃣ Переведите ${SUB_PRICE}₽ по СБП:\n` +
             `📱 Номер: ${SBP_PHONE}\n` +
             `👤 Получатель: ${SBP_RECIPIENT}\n\n` +
-            `2️⃣ Пришлите чек сюда\n\n` +            `⏱ Активация в течение 5 минут.`;
-
+            `2️⃣ Пришлите чек сюда\n\n` +
+            `⏱ Активация в течение 5 минут.`;
         ctx.reply(paymentMsg);
     });
 
@@ -390,9 +486,9 @@ module.exports = (bot, pool, ADMIN_ID) => {
                     
                     const adminMsg = 
                         `🔔 Новая оплата!\n\n` +
-                        `📋 Заявка #${paymentId}\n\n` +                        `👤 ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
-                        `💰 ${SUB_PRICE}₽\n\n` +
-                        `📎 Чек: ${fileLink}`;
+                        `📋 Заявка #${paymentId}\n\n` +
+                        `👤 ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
+                        `💰 ${SUB_PRICE}₽\n\n` +                        `📎 Чек: ${fileLink}`;
                     
                     await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {
                         reply_markup: {
@@ -405,15 +501,13 @@ module.exports = (bot, pool, ADMIN_ID) => {
                         }
                     });
                     
-                    console.log(`✅ Уведомление админу (чек #${paymentId})`);
-                    
                 } catch (notifyErr) {
-                    console.error('❌ Ошибка уведомления:', notifyErr.message);
+                    console.error('Notify error:', notifyErr.message);
                 }
             }
             
         } catch (err) {
-            console.error('❌ Ошибка чека:', err);
+            console.error('Check error:', err);
             ctx.reply('❌ Ошибка обработки чека.');
         }
     });
