@@ -22,7 +22,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
             .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
             .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')
             .replace(/[\*\_\`\[\]]/g, '')
-            .replace(/[✨⭐🍽️🍳🥘🍲🧄🌶️🫒🍅🍚✅⚠️️📊🔍📸]/g, '')
+            .replace(/[✨⭐🍽️🥘🍲🧄🌶️🍅🍚✅⚠️️📊🔍📸]/g, '')
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -147,27 +147,27 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const tgId = ctx.from.id;
         await createUser(tgId, ctx.from.username, ctx.from.first_name);        
         const sub = await getSubscription(tgId);
-        let msg = '👋 <b>Привет! Я Домашний Шеф</b> 🍳\n\n';
-        msg += '🎯 <b>Напиши продукты</b>, которые есть дома,\n';
-        msg += 'и я создам для тебя <b>шикарный рецепт</b>! 😋\n\n';
-        msg += `🎁 <b>${FREE_LIMIT} бесплатных рецепта</b>\n`;
+        let msg = '👋 Привет! Я Домашний Шеф 🍳\n\n';
+        msg += '🎯 Напиши продукты, которые есть дома,\n';
+        msg += 'и я создам для тебя шикарный рецепт! 😋\n\n';
+        msg += `🎁 ${FREE_LIMIT} бесплатных рецепта\n`;
         msg += `📸 Каждый рецепт с красивым фото!\n\n`;
         
         if (sub) {
             const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
-            msg += `✅ <b>PRO Подписка активна!</b>\n`;
+            msg += `✅ PRO Подписка активна!\n`;
             msg += `📅 До: ${new Date(sub.expires_at).toLocaleDateString('ru-RU')}\n`;
-            msg += `⏳ Осталось дней: <b>${daysLeft}</b>\n`;
-            msg += `🌟 <b>Неограниченные рецепты!</b>`;
+            msg += `⏳ Осталось дней: ${daysLeft}\n`;
+            msg += `🌟 Неограниченные рецепты!`;
         } else {
             const freeUsed = await getFreeRecipesUsed(tgId);
-            msg += `📊 Использовано: <b>${freeUsed} из ${FREE_LIMIT}</b>`;
+            msg += `📊 Использовано: ${freeUsed} из ${FREE_LIMIT}`;
         }
         
-        ctx.reply(msg, { parse_mode: 'HTML' });
+        ctx.reply(msg);
     });
 
-    // ===== ЗАПРОС РЕЦЕПТА С ИДЕАЛЬНЫМ ОФОРМЛЕНИЕМ =====
+    // ===== ЗАПРОС РЕЦЕПТА =====
     bot.on('text', async (ctx) => {
         const text = ctx.message.text.trim();
         const tgId = ctx.from.id;
@@ -175,7 +175,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
         if (text.startsWith('/')) return;
         
         if (tgId === ADMIN_ID) {
-            return ctx.reply('🔒 <b>Режим администратора</b>\nИспользуйте кнопки меню.', { parse_mode: 'HTML' });
+            return ctx.reply('🔒 Режим администратора\nИспользуйте кнопки меню.');
         }
         
         await createUser(tgId, ctx.from.username, ctx.from.first_name);
@@ -185,70 +185,67 @@ module.exports = (bot, pool, ADMIN_ID) => {
         
         if (!hasSub && freeUsed >= FREE_LIMIT) {
             return ctx.reply(
-                `🔒 <b>Лимит исчерпан!</b>\n\n` +
+                `🔒 Лимит исчерпан!\n\n` +
                 `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
-                `🌟 <b>PRO Подписка — ${SUB_PRICE}₽/месяц</b>\n` +
+                `🌟 PRO Подписка — ${SUB_PRICE}₽/месяц\n` +
                 `✅ Неограниченные рецепты\n📸 Красивые фото блюд`,
                 { 
-                    parse_mode: 'HTML', 
                     reply_markup: Markup.inlineKeyboard([
                         Markup.button.callback('💳 Оформить подписку', 'pay_subscribe')
                     ])
-                }            );
-        }
+                }
+            );        }
         
-        const loadingMsg = await ctx.reply('👨‍🍳 <b>Создаю рецепт...</b>\n✨ Подбираю идеальное сочетание', { parse_mode: 'HTML' });
+        const loadingMsg = await ctx.reply('👨‍🍳 Создаю рецепт...\n✨ Подбираю идеальное сочетание');
         
         try {
-            // ===== УЛУЧШЕННЫЙ ПРОМПТ =====
+            // ===== ИДЕАЛЬНЫЙ ПРОМПТ =====
             const response = await giga.chat({
                 model: 'GigaChat',
                 messages: [
                     { 
                         role: 'system', 
-                        content: `Ты — профессиональный шеф-повар и кулинарный блогер с талантом создавать аппетитные описания!
-
-Твоя задача — создать ПОДРОБНЫЙ, ЭМОЦИОНАЛЬНЫЙ и КРАСИВО ОФОРМЛЕННЫЙ рецепт.
+                        content: `Ты — профессиональный шеф-повар. Создаёшь рецепты БЕЗ markdown (без **), только текст с эмодзи.
 
 СТРОГАЯ СТРУКТУРА:
 
-🍽️ НАЗВАНИЕ БЛЮДА (с флагом страны) ✨
+🍽️ НАЗВАНИЕ БЛЮДА (флаг страны) ✨
 
-Эмоциональное описание блюда (2-3 предложения, чтобы слюнки текли!) 💖
+Эмоциональное описание (2-3 предложения) 💖
 
-                  ИНГРЕДИЕНТЫ:
+ ИНГРЕДИЕНТЫ:
 
-🍜 ингредиент 1 — количество (дополнительная информация)
-🥚 ингредиент 2 — количество (дополнительная информация)
-🧀 ингредиент 3 — количество (дополнительная информация)
-(и так далее, каждый с эмодзи)
+🍜 ингредиент — количество (пояснение)
+🥚 ингредиент — количество (пояснение)
+🧀 ингредиент — количество (пояснение)
 
 
 👨‍🍳 ШАГИ ПРИГОТОВЛЕНИЯ:
 
-1️⃣ Название шага 🔪
+1️⃣ Название шага 🔪 (3-5 минут)
 Эмоциональное описание этапа! 😋
-- Подробное действие 1 📏
-- Подробное действие 2 🥚
-- Важные детали 💡
-
-2️⃣ Название шага 🔥
-Описание почему это важно! 🤤
-- Действие с деталями ✨
+- Подробное действие с деталями 📏
+- Важные нюансы 💡
 - На что обратить внимание ⚠️
 
-3️⃣ Название шага 🍜
+2️⃣ Название шага 🔥 (5-7 минут)
+Почему это важно! 🤤
+- Действие 1 ✨
+- Действие 2 
+- Предупреждение ️
+
+3️ Название шага  (7-10 минут)
 Продолжай в том же духе...
-(минимум 4-6 шагов)
+(минимум 4-6 шагов с ТОЧНЫМ временем!)
 
 
 🎯 СОВЕТЫ ШЕФА:
-💡 Полезный совет 1💡 Полезный совет 2
+💡 Полезный совет 1
+💡 Полезный совет 2
 💡 Полезный совет 3
 💡 Полезный совет 4
 
-
-ПИЩЕВАЯ ЦЕННОСТЬ (на порцию):
+📊 ПИЩЕВАЯ ЦЕННОСТЬ (на порцию):
 🔥 Калории: ~X ккал
 🥩 Белки: X г
 🌾 Углеводы: X г
@@ -261,27 +258,24 @@ module.exports = (bot, pool, ADMIN_ID) => {
 👥 ПОРЦИЙ: X персоны
 
 
-ПРАВИЛА:
-1. Используй МНОГО эмодзи в каждом разделе
-2. Делай описания эмоциональными и аппетитными
-3. Давай конкретные количества (граммы, штуки, ложки)
-4. Добавляй пояснения в скобках
-5. Каждый шаг должен иметь название и подзаголовок
-6. Используй маркеры (-) для деталей в шагах
-7. Пиши живым, вдохновляющим языком
-8. Добавляй важные предупреждения ⚠️
-9. В советах давай реальные профессиональные хитрости
-10. Указывай точное время и калории`
+ВАЖНО:
+1. НИКАКИХ ** (звёздочек для жирного)!
+2. Каждому шагу ТОЧНОЕ время в скобках!
+3. Много эмодзи в каждом разделе
+4. Конкретные количества (граммы, штуки)
+5. Пояснения в скобках
+6. Живой, эмоциональный язык
+7. Профессиональные советы`
                     },
                     { 
                         role: 'user', 
-                        content: `Создай ШИКАРНЫЙ рецепт из этих продуктов: ${text}
+                        content: `Создай рецепт из: ${text}
 
-Оформи его ПОДРОБНО и КРАСИВО как описано выше! Сделай так, чтобы сразу захотелось готовить! 🔥` 
+Оформи КРАСИВО, с ТОЧНЫМ временем для каждого шага! Без markdown!` 
                     }
                 ],
                 max_tokens: 2000,
-                temperature: 0.9
+                temperature: 0.85
             });
             
             let recipe = response.choices[0].message.content;
@@ -292,15 +286,15 @@ module.exports = (bot, pool, ADMIN_ID) => {
             if (nameMatch && nameMatch[1]) {
                 dishName = cleanDishName(nameMatch[1]);
             }
-                        try {
+            
+            try {
                 await ctx.deleteMessage(loadingMsg.message_id);
             } catch (e) {}
             
             // Отправляем рецепт
-            await ctx.reply(recipe, { parse_mode: 'HTML' });
-            
+            await ctx.reply(recipe);            
             // Ищем фото
-            const photoMsg = await ctx.reply('📸 <b>Подбираю фото блюда...</b>', { parse_mode: 'HTML' });
+            const photoMsg = await ctx.reply('📸 Подбираю фото блюда...');
             
             let photoUrl = await searchFoodPhoto(dishName);
             if (!photoUrl) photoUrl = await searchFoodPhoto(text);
@@ -310,7 +304,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 await ctx.deleteMessage(photoMsg.message_id);
             } catch (e) {}
             
-            const caption = `📸 <b>${dishName}</b>\nПриятного аппетита! 😋`;
+            const caption = `📸 ${dishName}\nПриятного аппетита! 😋`;
             const sent = await sendPhotoWithRetry(ctx, photoUrl, caption);
             
             if (!sent) {
@@ -322,7 +316,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 await incrementFreeRecipes(tgId);
                 const left = FREE_LIMIT - (freeUsed + 1);
                 if (left > 0) {
-                    await ctx.reply(`🎁 Осталось бесплатных рецептов: <b>${left}</b>`, { parse_mode: 'HTML' });
+                    await ctx.reply(`🎁 Осталось бесплатных рецептов: ${left}`);
                 }
             }
             
@@ -331,7 +325,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
             try {
                 await ctx.deleteMessage(loadingMsg.message_id);
             } catch (err) {}
-            ctx.reply('❌ <b>Ошибка генерации рецепта</b>\nПопробуйте позже.', { parse_mode: 'HTML' });
+            ctx.reply('❌ Ошибка генерации рецепта\nПопробуйте позже.');
         }
     });
 
@@ -341,15 +335,15 @@ module.exports = (bot, pool, ADMIN_ID) => {
         
         const SBP_PHONE = process.env.SBP_PHONE || '+79022231321';
         const SBP_RECIPIENT = process.env.SBP_RECIPIENT || 'Ермачкова Алина В.';
-                const paymentMsg = 
-            `💳 <b>Оплата PRO подписки — ${SUB_PRICE}₽/месяц</b>\n\n` +
-            `1️⃣ Переведите <b>${SUB_PRICE}₽</b> по СБП:\n` +
-            `📱 Номер: <code>${SBP_PHONE}</code>\n` +
+        
+        const paymentMsg = 
+            `💳 Оплата PRO подписки — ${SUB_PRICE}₽/месяц\n\n` +
+            `1️⃣ Переведите ${SUB_PRICE}₽ по СБП:\n` +
+            `📱 Номер: ${SBP_PHONE}\n` +
             `👤 Получатель: ${SBP_RECIPIENT}\n\n` +
-            `2️⃣ Пришлите <b>чек</b> сюда\n\n` +
-            `⏱ Активация в течение 5 минут.`;
+            `2️⃣ Пришлите чек сюда\n\n` +            `⏱ Активация в течение 5 минут.`;
 
-        ctx.reply(paymentMsg, { parse_mode: 'HTML' });
+        ctx.reply(paymentMsg);
     });
 
     // ===== ЧЕКИ =====
@@ -384,25 +378,23 @@ module.exports = (bot, pool, ADMIN_ID) => {
             const paymentId = rows[0].id;
             
             await ctx.reply(
-                `✅ <b>Чек получен!</b>\n\n` +
+                `✅ Чек получен!\n\n` +
                 `📋 Заявка #${paymentId}\n` +
-                `⏱ Активация в течение 5 минут`,
-                { parse_mode: 'HTML' }
+                `⏱ Активация в течение 5 минут`
             );
             
-            if (ADMIN_ID) {                try {
+            if (ADMIN_ID) {
+                try {
                     const currentUser = await getUser(tgId);
                     const fileLink = await ctx.telegram.getFileLink(fileId);
                     
                     const adminMsg = 
-                        `🔔 <b>Новая оплата!</b>\n\n` +
-                        `📋 Заявка #${paymentId}\n\n` +
-                        `👤 ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
+                        `🔔 Новая оплата!\n\n` +
+                        `📋 Заявка #${paymentId}\n\n` +                        `👤 ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
                         `💰 ${SUB_PRICE}₽\n\n` +
-                        `📎 <a href="${fileLink}">Открыть чек</a>`;
+                        `📎 Чек: ${fileLink}`;
                     
                     await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {
-                        parse_mode: 'HTML',
                         reply_markup: {
                             inline_keyboard: [
                                 [
