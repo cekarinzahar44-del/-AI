@@ -2,8 +2,8 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 require('dotenv').config();
 
-const http = require('http');
 const { Telegraf } = require('telegraf');
+const http = require('http');
 const { Pool } = require('pg');
 const cron = require('node-cron');
 
@@ -34,57 +34,44 @@ http.createServer((req, res) => {
 
 // ===== ИНИЦИАЛИЗАЦИЯ БД =====
 async function initDB() {
+    // Создаем таблицы, если их нет
     await pool.query(`CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY, tg_id BIGINT UNIQUE NOT NULL,
         username TEXT, first_name TEXT, free_recipes_used INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW()
     )`);
-    
     await pool.query(`CREATE TABLE IF NOT EXISTS subscriptions (
         id SERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(tg_id) ON DELETE CASCADE,
         starts_at TIMESTAMP DEFAULT NOW(), expires_at TIMESTAMP NOT NULL,
         is_active BOOLEAN DEFAULT TRUE, payment_receipt_id TEXT
     )`);
-    
     await pool.query(`CREATE TABLE IF NOT EXISTS payments (
         id SERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(tg_id),
         amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL,
-        status VARCHAR(20) DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT NOW(), approved_by BIGINT, approved_at TIMESTAMP
+        status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW(),
+        approved_by BIGINT, approved_at TIMESTAMP
     )`);
-    
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_subs_user ON subscriptions(user_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_subs_expires ON subscriptions(expires_at)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)');
-    
     console.log('✅ БД инициализирована');
 }
 
 // ===== ПОДКЛЮЧАЕМ МОДУЛИ =====
-require('./bot')(bot, pool);        // Пользовательская часть
-require('./admin')(bot, pool, ADMIN_ID);  // Админ-панель
+// Важно: admin подключен первым, чтобы перехватывать команды админа
+require('./admin')(bot, pool, ADMIN_ID); 
+require('./bot')(bot, pool);
 
-// ===== КРОН: НАПОМИНАНИЯ =====
+// ===== КРОН (Напоминания) =====
 cron.schedule('0 10 * * *', async () => {
-    console.log('⏰ Проверка подписок...');
     try {
-        const { rows: soon } = await pool.query(`
+        const { rows } = await pool.query(`
             SELECT u.tg_id, s.expires_at FROM subscriptions s 
             JOIN users u ON s.user_id = u.tg_id 
-            WHERE s.is_active = TRUE 
-            AND s.expires_at BETWEEN NOW() AND NOW() + INTERVAL '3 days'
+            WHERE s.is_active = TRUE AND s.expires_at BETWEEN NOW() AND NOW() + INTERVAL '3 days'
         `);
-        
-        for (const sub of soon) {
+        for (const sub of rows) {
             const days = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
-            await bot.telegram.sendMessage(sub.tg_id, 
-                `⏰ <b>Подписка истекает через ${days} д.</b>\nПродлите, чтобы не потерять доступ!`,
-                { parse_mode: 'HTML' }
-            );
+            await bot.telegram.sendMessage(sub.tg_id, `⏰ Подписка истекает через ${days} д. Продлите!`, { parse_mode: 'HTML' });
         }
-        
         await pool.query(`UPDATE subscriptions SET is_active = FALSE WHERE expires_at < NOW()`);
-        console.log('✅ Истёкшие подписки деактивированы');
     } catch (e) { console.error('Cron error:', e); }
 });
 
