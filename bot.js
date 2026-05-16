@@ -39,26 +39,22 @@ module.exports = (bot, pool, ADMIN_ID) => {
     function detectQueryType(text) {
         const lowerText = text.toLowerCase().trim();
         
-        // Проверяем на конкретное блюдо
         for (const dish of knownDishes) {
             if (lowerText.includes(dish)) {
                 return { type: 'dish', dish: dish };
             }
         }
         
-        // Проверяем на ключевые слова рецепта
-        if (lowerText.includes('рецепт') ||             lowerText.includes('приготовить') || 
-            lowerText.includes('как сделать') ||
-            lowerText.includes('как приготовить')) {
+        if (lowerText.includes('рецепт') || 
+            lowerText.includes('приготовить') || 
+            lowerText.includes('как сделать') ||            lowerText.includes('как приготовить')) {
             
-            // Извлекаем название блюда после ключевого слова
             const match = lowerText.match(/(?:рецепт|приготовить|сделать)\s+(.+)/i);
             if (match && match[1]) {
                 return { type: 'dish', dish: match[1].trim() };
             }
         }
         
-        // Если просто перечисление продуктов
         return { type: 'ingredients', ingredients: text };
     }
 
@@ -73,63 +69,165 @@ module.exports = (bot, pool, ADMIN_ID) => {
             .trim();
     }
 
-    // ===== ПОИСК ФОТО =====
-    async function searchFoodPhoto(dishName) {
+    // ===== МНОГОУРОВНЕВЫЙ ПОИСК ФОТО =====
+    async function findFoodPhoto(dishName, ingredients) {
+        const cleanName = cleanDishName(dishName);
+        console.log(`🔍 Ищем фото для: "${cleanName}"`);
+        
+        let photoUrl = null;
+        
+        // 1️⃣ Pexels API
+        if (!photoUrl) {
+            photoUrl = await searchPexels(cleanName);
+        }
+        
+        // 2️⃣ Unsplash
+        if (!photoUrl) {
+            photoUrl = await searchUnsplash(cleanName);
+        }
+        
+        // 3️⃣ Pinterest (если есть токен)
+        if (!photoUrl && process.env.PINTEREST_ACCESS_TOKEN) {
+            photoUrl = await searchPinterest(cleanName);
+        }
+        
+        // 4️⃣ Fallback база
+        if (!photoUrl) {
+            photoUrl = getFallbackPhoto(cleanName);
+        }
+        
+        return photoUrl;    }
+
+    // ===== 1. PEXELS =====
+    async function searchPexels(query) {
         try {
             const PEXELS_KEY = process.env.PEXELS_API_KEY;
-            
             if (!PEXELS_KEY) return null;
             
-            const cleanName = cleanDishName(dishName);
-            console.log(`🔍 Searching: "${cleanName}"`);
+            const searchTerms = [
+                query + ' food dish',
+                query + ' recipe',
+                query + ' cooking',
+                'delicious ' + query
+            ];
             
-            if (!cleanName || cleanName.length < 3) return null;
-            
-            const res = await axios.get(
-                `https://api.pexels.com/v1/search?query=${encodeURIComponent(cleanName + ' food dish')}&per_page=1`,
-                { 
-                    headers: { 'Authorization': PEXELS_KEY, 'User-Agent': 'HomeChefBot/1.0' },
-                    timeout: 5000
+            for (const term of searchTerms) {
+                const res = await axios.get(
+                    `https://api.pexels.com/v1/search?query=${encodeURIComponent(term)}&per_page=3`,
+                    { 
+                        headers: { 'Authorization': PEXELS_KEY },
+                        timeout: 3000
+                    }
+                );
+                
+                if (res.data.photos && res.data.photos.length > 0) {
+                    const randomPhoto = res.data.photos[Math.floor(Math.random() * res.data.photos.length)];
+                    console.log(`✅ Pexels нашёл: ${randomPhoto.src.large}`);
+                    return randomPhoto.src.large;
                 }
-            );
-            
-            if (res.data.photos && res.data.photos.length > 0) {
-                return res.data.photos[0].src.large;
             }
-                        return null;
+            
+            return null;
         } catch (err) {
-            console.error('Pexels error:', err.message);
+            console.log('❌ Pexels не нашёл');
             return null;
         }
     }
 
-    // ===== ЗАПАСНЫЕ ФОТО =====
+    // ===== 2. UNSPLASH =====
+    async function searchUnsplash(query) {
+        try {
+            const searchTerms = [
+                query + '+food',
+                query + '+dish',
+                query + '+recipe'
+            ];
+            
+            for (const term of searchTerms) {
+                const imageUrl = `https://source.unsplash.com/600x400/?${term}`;
+                const res = await axios.head(imageUrl, { timeout: 3000 });                if (res.status === 200) {
+                    console.log(`✅ Unsplash нашёл: ${imageUrl}`);
+                    return imageUrl;
+                }
+            }
+            
+            return null;
+        } catch (err) {
+            console.log('❌ Unsplash не нашёл');
+            return null;
+        }
+    }
+
+    // ===== 3. PINTEREST =====
+    async function searchPinterest(query) {
+        try {
+            const PINTEREST_TOKEN = process.env.PINTEREST_ACCESS_TOKEN;
+            if (!PINTEREST_TOKEN) return null;
+            
+            const res = await axios.get(
+                `https://api.pinterest.com/v5/pins?query=${encodeURIComponent(query + ' food')}&per_page=3`,
+                { 
+                    headers: { 'Authorization': `Bearer ${PINTEREST_TOKEN}` },
+                    timeout: 5000
+                }
+            );
+            
+            if (res.data.items && res.data.items.length > 0) {
+                const imageUrl = res.data.items[0].media?.images?.['600x']?.url;
+                if (imageUrl) {
+                    console.log(`✅ Pinterest нашёл: ${imageUrl}`);
+                    return imageUrl;
+                }
+            }
+            
+            return null;
+        } catch (err) {
+            console.log('❌ Pinterest не нашёл');
+            return null;
+        }
+    }
+
+    // ===== 4. FALLBACK БАЗА =====
     function getFallbackPhoto(dishName) {
         const cleanName = cleanDishName(dishName).toLowerCase();
         
         const fallbackImages = {
             'паста': 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=600',
             'спагетти': 'https://images.pexels.com/photos/2069355/pexels-photo-2069355.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'карбонара': 'https://images.pexels.com/photos/1633571/pexels-photo-1633571.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'карбонара': 'https://images.pexels.com/photos/1633571/pexels-photo-1633571.jpeg?auto=compress&cs=tinysrgb&w=600',            'болоньезе': 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'лазанья': 'https://images.pexels.com/photos/2456514/pexels-photo-2456514.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'пицца': 'https://images.pexels.com/photos/846175/pexels-photo-846175.jpeg?auto=compress&cs=tinysrgb&w=600',
             'борщ': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'пицц': 'https://images.pexels.com/photos/846175/pexels-photo-846175.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'салат': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'суп': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'пельмени': 'https://images.pexels.com/photos/3577503/pexels-photo-3577503.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'блины': 'https://images.pexels.com/photos/2211435/pexels-photo-2211435.jpeg?auto=compress&cs=tinysrgb&w=600',
             'куриц': 'https://images.pexels.com/photos/2871757/pexels-photo-2871757.jpeg?auto=compress&cs=tinysrgb&w=600',
             'мяс': 'https://images.pexels.com/photos/1600412/pexels-photo-1600412.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'говядин': 'https://images.pexels.com/photos/1600412/pexels-photo-1600412.jpeg?auto=compress&cs=tinysrgb&w=600',
             'рыб': 'https://images.pexels.com/photos/1267320/pexels-photo-1267320.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'десерт': 'https://images.pexels.com/photos/1558616/pexels-photo-1558616.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'торт': 'https://images.pexels.com/photos/1920173/pexels-photo-1920173.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'салат': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'овощ': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'суп': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
             'яиц': 'https://images.pexels.com/photos/162710/pexels-photo-162710.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'омлет': 'https://images.pexels.com/photos/162710/pexels-photo-162710.jpeg?auto=compress&cs=tinysrgb&w=600',
             'рис': 'https://images.pexels.com/photos/1134215/pexels-photo-1134215.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'овощ': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600'
+            'гречк': 'https://images.pexels.com/photos/1134215/pexels-photo-1134215.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'картофел': 'https://images.pexels.com/photos/5409015/pexels-photo-5409015.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'торт': 'https://images.pexels.com/photos/1920173/pexels-photo-1920173.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'десерт': 'https://images.pexels.com/photos/1558616/pexels-photo-1558616.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'бургер': 'https://images.pexels.com/photos/1633571/pexels-photo-1633571.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'суши': 'https://images.pexels.com/photos/3577503/pexels-photo-3577503.jpeg?auto=compress&cs=tinysrgb&w=600',
+            'default': 'https://images.pexels.com/photos/33242/cooking-food-ingredient-kitchen.jpg?auto=compress&cs=tinysrgb&w=600'
         };
         
         for (const [key, url] of Object.entries(fallbackImages)) {
-            if (cleanName.includes(key)) return url;
+            if (cleanName.includes(key)) {
+                console.log(`📎 Fallback для: ${key}`);
+                return url;
+            }
         }
         
-        return 'https://images.pexels.com/photos/33242/cooking-food-ingredient-kitchen.jpg?auto=compress&cs=tinysrgb&w=600';
+        console.log('📎 Используем дефолтное фото');
+        return fallbackImages['default'];
     }
 
     // ===== ОТПРАВКА ФОТО =====
@@ -239,14 +337,11 @@ module.exports = (bot, pool, ADMIN_ID) => {
             );
         }
         
-        // Определяем тип запроса
         const query = detectQueryType(text);
-        
         let loadingMsg, recipe, dishName;
-                try {
-            if (query.type === 'dish') {
-                // ===== РЕЖИМ 1: КОНКРЕТНОЕ БЛЮДО =====
-                dishName = query.dish;
+        
+        try {
+            if (query.type === 'dish') {                dishName = query.dish;
                 loadingMsg = await ctx.reply(`🍽️ Ищу рецепт: ${dishName}...\n⏱ 1-2 минуты`);
                 
                 const response = await giga.chat({
@@ -268,7 +363,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 🥚 ингредиент — количество (пояснение)
 
 
-👨‍🍳 ШАГИ ПРИГОТОВЛЕНИЯ:
+👨‍ ШАГИ ПРИГОТОВЛЕНИЯ:
 
 1️⃣ Название шага 🔪 (3-5 минут)
 Описание этапа! 😋
@@ -292,10 +387,10 @@ module.exports = (bot, pool, ADMIN_ID) => {
 📊 ПИЩЕВАЯ ЦЕННОСТЬ (на порцию):
 🔥 Калории: ~X ккал
 🥩 Белки: X г
-🌾 Углеводы: X г🧈 Жиры: X г
+🌾 Углеводы: X г
+🧈 Жиры: X г
 
 🍷 ИДЕАЛЬНАЯ ПАРА: напиток
-
 ⏱ ОБЩЕЕ ВРЕМЯ: X минут
 📊 СЛОЖНОСТЬ: ⭐⭐☆☆☆
 👥 ПОРЦИЙ: X персоны
@@ -319,7 +414,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 recipe = response.choices[0].message.content;
                 
             } else {
-                // ===== РЕЖИМ 2: ИЗ ПРОДУКТОВ =====
                 dishName = 'Блюдо из твоих продуктов';
                 loadingMsg = await ctx.reply(`🛒 Создаю рецепт из: ${text}...\n✨ Магия начинается!`);
                 
@@ -342,11 +436,11 @@ module.exports = (bot, pool, ADMIN_ID) => {
 Описание (почему это вкусно!) 💖
 
 🛒 ТВОИ ПРОДУКТЫ:
+
 🍜 продукт 1 — количество
 🥚 продукт 2 — количество
 
-
-👨‍ ПРИГОТОВЛЕНИЕ:
+👨‍🍳 ПРИГОТОВЛЕНИЕ:
 
 1️⃣ Название шага 🔪 (X минут)
 - Что делаем 📏
@@ -390,24 +484,25 @@ module.exports = (bot, pool, ADMIN_ID) => {
             
             try {
                 await ctx.deleteMessage(loadingMsg.message_id);
-            } catch (e) {}            
-            // Отправляем рецепт
+            } catch (e) {}
+            
             await ctx.reply(recipe);
             
-            // Ищем фото
-            const photoMsg = await ctx.reply('📸 Подбираю фото...');
+            // Ищем фото с 4 уровнями поиска!            const photoMsg = await ctx.reply('📸 Подбираю фото...');
             
-            let photoUrl = await searchFoodPhoto(dishName);
-            if (!photoUrl) photoUrl = getFallbackPhoto(dishName);
+            const photoUrl = await findFoodPhoto(dishName, text);
             
             try {
                 await ctx.deleteMessage(photoMsg.message_id);
             } catch (e) {}
             
             const caption = `📸 ${dishName}\nПриятного аппетита! 😋`;
-            await sendPhotoWithRetry(ctx, photoUrl, caption);
+            const sent = await sendPhotoWithRetry(ctx, photoUrl, caption);
             
-            // Считаем рецепты
+            if (!sent) {
+                await ctx.reply('📸 Фото не загрузилось, но рецепт отличный! 😊');
+            }
+            
             if (!hasSub) {
                 await incrementFreeRecipes(tgId);
                 const left = FREE_LIMIT - (freeUsed + 1);
@@ -439,9 +534,9 @@ module.exports = (bot, pool, ADMIN_ID) => {
             `👤 Получатель: ${SBP_RECIPIENT}\n\n` +
             `2️⃣ Пришлите чек сюда\n\n` +
             `⏱ Активация в течение 5 минут.`;
+
         ctx.reply(paymentMsg);
     });
-
     // ===== ЧЕКИ =====
     bot.on(['photo', 'document'], async (ctx) => {
         const tgId = ctx.from.id;
@@ -488,10 +583,10 @@ module.exports = (bot, pool, ADMIN_ID) => {
                         `🔔 Новая оплата!\n\n` +
                         `📋 Заявка #${paymentId}\n\n` +
                         `👤 ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
-                        `💰 ${SUB_PRICE}₽\n\n` +                        `📎 Чек: ${fileLink}`;
+                        `💰 ${SUB_PRICE}₽\n\n` +
+                        `📎 Чек: ${fileLink}`;
                     
-                    await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {
-                        reply_markup: {
+                    await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {                        reply_markup: {
                             inline_keyboard: [
                                 [
                                     { text: '✅ Подтвердить', callback_data: `approve_${paymentId}` },
