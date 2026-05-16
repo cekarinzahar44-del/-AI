@@ -1,11 +1,11 @@
 {
   "name": "home-chef-gigachat",
   "version": "2.0.0",
-  "description": "AI Chef Bot with Subscription",
-  "main": "bot.js",
+  "description": "AI Chef Bot",
+  "main": "index.js", 
   "scripts": {
-    "start": "node bot.js",
-    "dev": "nodemon bot.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "dependencies": {
     "telegraf": "^4.16.3",
