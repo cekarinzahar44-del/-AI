@@ -13,7 +13,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
     // ===== АДМИН /start =====
     bot.start(async (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) return; // Пропускаем, пусть обрабатывает bot.js
+        if (ctx.from.id !== ADMIN_ID) return;
         
         try {
             const { rows: stats } = await pool.query(`
@@ -187,16 +187,14 @@ module.exports = (bot, pool, ADMIN_ID) => {
         try {
             await ctx.answerCbQuery('⏳ Активация...');
             
-            // Обновляем платёж
             await pool.query(
                 `UPDATE payments SET status='approved', approved_by=$1, approved_at=NOW() WHERE id=$2`,
                 [ADMIN_ID, payId]
             );
             
-            // Находим пользователя
-            const { rows } = await pool.query(                `SELECT user_id FROM payments WHERE id=$1`, 
-                [payId]
-            );
+            const { rows } = await pool.query(
+                `SELECT user_id FROM payments WHERE id=$1`, 
+                [payId]            );
             
             if (!rows.length) {
                 return ctx.answerCbQuery('❌ Платёж не найден', { show_alert: true });
@@ -207,14 +205,12 @@ module.exports = (bot, pool, ADMIN_ID) => {
             const expires = new Date();
             expires.setDate(expires.getDate() + SUB_DAYS);
             
-            // Создаём подписку
             await pool.query(
                 `INSERT INTO subscriptions (user_id, expires_at, payment_receipt_id) 
                  VALUES ($1, $2, $3)`,
                 [userId, expires, payId]
             );
             
-            // Уведомляем пользователя
             await ctx.telegram.sendMessage(
                 userId,
                 `🎉 <b>Подписка активирована!</b>\n\n` +
@@ -224,7 +220,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 { parse_mode: 'HTML' }
             );
             
-            // Обновляем сообщение админа
             await ctx.editMessageText(`✅ <b>Заявка #${payId} подтверждена!</b>\nПодписка выдана пользователю ${userId}`);
             
             await ctx.answerCbQuery('✅ Подписка выдана!', { show_alert: false });
@@ -243,12 +238,12 @@ module.exports = (bot, pool, ADMIN_ID) => {
         
         const payId = ctx.match[1];
         
-        try {            await pool.query(`UPDATE payments SET status='rejected' WHERE id=$1`, [payId]);
+        try {
+            await pool.query(`UPDATE payments SET status='rejected' WHERE id=$1`, [payId]);
             
             await ctx.editMessageText(`❌ <b>Заявка #${payId} отклонена</b>`);
             
-            await ctx.answerCbQuery('❌ Отклонено');
-            console.log(`❌ Заявка #${payId} отклонена`);
+            await ctx.answerCbQuery('❌ Отклонено');            console.log(`❌ Заявка #${payId} отклонена`);
             
         } catch (e) {
             console.error('Reject error:', e);
