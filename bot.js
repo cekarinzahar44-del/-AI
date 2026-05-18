@@ -59,33 +59,47 @@ async function callGigaChat(systemPrompt, userPrompt) {
 // =========================
 // CLEAN HTML + AUTO-FIX
 // =========================
+// =========================
+// CLEAN HTML + AUTO-FIX
+// =========================
 function cleanHtml(text) {
     if (!text) return '';
+    
+    // 1. Удаляем ВСЁ, кроме букв, цифр, эмодзи и базовой пунктуации
     let safeText = text
-        .replace(/```html/gi, '').replace(/```/g, '')
-        .replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<html[\s\S]*?>/gi, '').replace(/<\/html>/gi, '')
-        .replace(/<body[\s\S]*?>/gi, '').replace(/<\/body>/gi, '')
-        .replace(/<head[\s\S]*?<\/head>/gi, '')
-        .replace(/<h1>/gi, '<b>').replace(/<\/h1>/gi, '</b>\n')
-        .replace(/<h2>/gi, '<b>').replace(/<\/h2>/gi, '</b>\n')
-        .replace(/<ul>/gi, '').replace(/<\/ul>/gi, '')
-        .replace(/<ol.*?>/gi, '').replace(/<\/ol>/gi, '')
-        .replace(/<li>/gi, '• ').replace(/<\/li>/gi, '\n')
+        .replace(/```html/gi, '')
+        .replace(/```/g, '')
+        .replace(/<[^>]*>/g, '')  // 🔥 УДАЛЯЕТ ВСЕ HTML ТЕГИ
         .replace(/\*\*/g, '')
-        .replace(/<br>/gi, '\n').replace(/<br\/>/gi, '\n').replace(/<br \/>/gi, '\n')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/<div>/gi, '').replace(/<\/div>/gi, '\n')
-        .replace(/class=".*?"/gi, '').replace(/style=".*?"/gi, '')
+        .replace(/&nbsp;/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
     
-    const open = (safeText.match(/<b>/g) || []).length;
-    const close = (safeText.match(/<\/b>/g) || []).length;
-    if (open > close) safeText += '</b>'.repeat(open - close);
+    // 2. Добавляем <b> ТОЛЬКО вокруг заголовков (по эмодзи)
+    safeText = safeText
+        .replace(/(🍽 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(📝 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(🛒 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(⏱ .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(🔥 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(👨\u200d🍳 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(💡 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(🍷 .+?)(\n)/g, '<b>$1</b>$2')
+        .replace(/(📊 .+?)(\n)/g, '<b>$1</b>$2');
+    
+    // 3. ФИНАЛЬНАЯ ПРОВЕРКА: считаем теги
+    const openCount = (safeText.match(/<b>/g) || []).length;
+    const closeCount = (safeText.match(/<\/b>/g) || []).length;
+    
+    // Если тегов разное количество — удаляем ВСЕ теги
+    if (openCount !== closeCount) {
+        console.warn('⚠️ HTML tags mismatch, removing all tags');
+        return safeText.replace(/<\/?b>/g, '');
+    }
     
     return safeText;
 }
+
 
 // =========================
 // EXPORT MODULE
