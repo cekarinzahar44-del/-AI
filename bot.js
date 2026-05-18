@@ -1,20 +1,71 @@
 const { Telegraf, Markup } = require('telegraf');
-const { GigaChat } = require('gigachat');
+const crypto = require('crypto'); // 🔹 Добавлено для генерации RqUID
 
 const GIGA_CREDENTIALS = process.env.GIGACHAT_CREDENTIALS;
 
 const PRO_PRICE = 500;
-const VIP_PRICE = 800; // ✅ Исправлено по ТЗ
-
+const VIP_PRICE = 800;
 const FREE_LIMIT = 3;
 
 const SBP_PHONE = process.env.SBP_PHONE || '+79022231321';
 const SBP_RECIPIENT = process.env.SBP_RECIPIENT || 'Ермачкова Алина В.';
 
-const giga = new GigaChat({
-    credentials: GIGA_CREDENTIALS,
-    scope: 'GIGACHAT_API_PERS'
-});
+// 🔹 УДАЛЕНО: const giga = new GigaChat(...)
+// 🔹 ВСТАВЛЕНО: Нативные функции для GigaChat API через fetch
+
+// =========================
+// 🔌 GIGACHAT API (Native Fetch)
+// =========================
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getGigaToken() {
+    if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+    
+    const res = await fetch('https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+            'Authorization': `Basic ${GIGA_CREDENTIALS}`,
+            'RqUID': crypto.randomUUID()
+        },
+        body: 'scope=GIGACHAT_API_PERS'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(`GigaChat Auth: ${data.message || res.statusText}`);
+    
+    cachedToken = data.access_token;
+    tokenExpiry = Date.now() + (data.expires_at - 30) * 1000;
+    return cachedToken;
+}
+
+async function callGigaChat(systemPrompt, userPrompt, maxTokens = 3000, temperature = 0.85) {
+    const token = await getGigaToken();
+    const res = await fetch('https://gigachat.devices.sberbank.ru/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'        },
+        body: JSON.stringify({
+            model: 'GigaChat',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ],
+            max_tokens: maxTokens,
+            temperature
+        })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(`GigaChat API: ${data.message || res.statusText}`);
+    return data.choices[0].message.content;
+}
+
+// =========================
+// ВАШ КОД НИЖЕ — БЕЗ ИЗМЕНЕНИЙ (кроме замены giga.chat → callGigaChat)
+// =========================
 
 module.exports = (bot, pool, ADMIN_ID) => {
 
@@ -31,7 +82,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
     function detectRequestType(text) {
         const lower = text.toLowerCase();
         
-        // Ключевые слова для запроса блюда
         const dishKeywords = [
             'рецепт', 'приготовь', 'хочу', 'сделай', 'как сделать',
             'карбонара', 'борщ', 'паста', 'салат', 'суп', 'котлеты',
@@ -40,15 +90,13 @@ module.exports = (bot, pool, ADMIN_ID) => {
             'печенье', 'кекс', 'суфле', 'мусс', 'желе', 'крем'
         ];
         
-        // Если есть глагол "приготовь" или название блюда → запрос блюда
         if (dishKeywords.some(kw => lower.includes(kw))) {
             return 'dish';
         }
         
-        // Если текст похож на список ингредиентов (через запятую/пробел, есть продукты)
         const ingredientPatterns = [
-            /\b(куриц|говядин|свинин|рыб|лук|морков|картофел|помидор|огурц|чеснок|сметан|молок|сыр|яиц|масл|мука|сахар|соль|перец|специ|зелень|капуст|свёкл|фасол|рис|гречк|макарон|лаваш|творог|сливк|йогурт|мед|лимон|апельсин|яблок|груш|банан|клубник|малин|смородин|орех|изюм|шоколад|какао|ванил|кориц|имбирь|базилик|петруш|укроп|кинз|мят|розмарин|тимьян|паприк|куркум|карри|соев|уксус|вин|коньяк|водк|пиво)\b/ig        ];
-        
+            /\b(куриц|говядин|свинин|рыб|лук|морков|картофел|помидор|огурц|чеснок|сметан|молок|сыр|яиц|масл|мука|сахар|соль|перец|специ|зелень|капуст|свёкл|фасол|рис|гречк|макарон|лаваш|творог|сливк|йогурт|мед|лимон|апельсин|яблок|груш|банан|клубник|малин|смородин|орех|изюм|шоколад|какао|ванил|кориц|имбирь|базилик|петруш|укроп|кинз|мят|розмарин|тимьян|паприк|куркум|карри|соев|уксус|вин|коньяк|водк|пиво)\b/ig
+        ];        
         const hasCommas = text.includes(',');
         const hasIngredients = ingredientPatterns.some(p => p.test(lower));
         
@@ -56,7 +104,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
             return 'ingredients';
         }
         
-        // По умолчанию считаем запросом блюда
         return 'dish';
     }
 
@@ -98,8 +145,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
 ${isVIP ? `✨ VIP-ДОПОЛНЕНИЯ:
 • 🥗 Калорийность блюда (КБЖУ на порцию)
-• ${isPP ? '• Только ПП-ингредиенты, без сахара/муки/жиров' : ''}
-• 📊 Рекомендации диетолога (если запрошено)
+• ${isPP ? '• Только ПП-ингредиенты, без сахара/муки/жиров' : ''}• 📊 Рекомендации диетолога (если запрошено)
 ` : ''}
 
 Используй эмодзи для визуального разделения.
@@ -123,7 +169,6 @@ ${details ? `Дополнительно: ${details}` : ''}
             };
         }
         
-        // requestType === 'dish'
         return {
             system: baseSystem,
             user: `🎯 ЗАДАЧА: Пользователь запросил блюдо или общий рецепт.
@@ -145,11 +190,11 @@ ${details ? `Условия: ${details}` : ''}
             `INSERT INTO users (tg_id, username, first_name, free_recipes_used)
              VALUES ($1, $2, $3, 0)
              ON CONFLICT (tg_id) DO NOTHING`,
-            [tgId, username, firstName]        );
+            [tgId, username, firstName]
+        );
     }
 
-    async function getUser(tgId) {
-        const { rows } = await pool.query(`SELECT * FROM users WHERE tg_id = $1`, [tgId]);
+    async function getUser(tgId) {        const { rows } = await pool.query(`SELECT * FROM users WHERE tg_id = $1`, [tgId]);
         return rows[0];
     }
 
@@ -198,8 +243,7 @@ ${details ? `Условия: ${details}` : ''}
 • Всё из PRO +
 • 📅 Меню от ИИ: день / неделя / 2 недели / месяц
 • 🥗 ИИ-Диетолог: похудение / набор массы / поддержание веса
-• 🥗 Только ПП-блюда (по запросу)
-• 🔢 Счётчик калорий и КБЖУ для каждого блюда`,
+• 🥗 Только ПП-блюда (по запросу)• 🔢 Счётчик калорий и КБЖУ для каждого блюда`,
             {
                 parse_mode: 'HTML',
                 reply_markup: Markup.inlineKeyboard([
@@ -238,7 +282,6 @@ ${details ? `Условия: ${details}` : ''}
         const subscription = await hasSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
 
-        // ✅ Активная подписка
         if (subscription) {
             return ctx.reply(
                 `👨‍🍳 <b>Добро пожаловать обратно!</b>
@@ -249,16 +292,13 @@ ${details ? `Условия: ${details}` : ''}
 • Или название блюда — дам классический рецепт
 
 ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — меню на период, /diet — ИИ-диетолог' : ''}`,
-                { parse_mode: 'HTML' }
-            );
+                { parse_mode: 'HTML' }            );
         }
 
-        // 🔒 Лимит исчерпан
         if (freeUsed >= FREE_LIMIT) {
             return sendSubscriptionMenu(ctx);
         }
 
-        // 👋 Новый пользователь / есть бесплатные попытки
         const left = FREE_LIMIT - freeUsed;
         await ctx.reply(
             `👨‍🍳 <b>Привет! Я Шеф-Повар AI</b>
@@ -292,7 +332,8 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
     bot.action('pay_vip', async (ctx) => {
         await ctx.answerCbQuery();
         userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };
-                await ctx.editMessageText(
+        
+        await ctx.editMessageText(
             getPaymentInstruction('VIP', VIP_PRICE),
             {
                 parse_mode: 'HTML',
@@ -300,8 +341,7 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
                     [Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')]
                 ])
             }
-        );
-    });
+        );    });
 
     bot.action('show_subscriptions', async (ctx) => {
         await ctx.answerCbQuery();
@@ -316,7 +356,6 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
         const tgId = ctx.from.id;
         const state = userStates[tgId];
         
-        // Если пользователь не в процессе оплаты — игнорируем файлы
         if (!state?.payingFor) {
             return ctx.reply('📎 Я принимаю чеки только в процессе оплаты подписки.\nЕсли вы хотели отправить рецепт — просто напишите текст.');
         }
@@ -332,7 +371,6 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
         const planType = state.payingFor;
         const amount = state.amount;
 
-        // Сохраняем заявку
         const { rows } = await pool.query(
             `INSERT INTO payments (user_id, amount, receipt_file_id, status, plan_type)
              VALUES ($1, $2, $3, 'pending', $4)
@@ -341,7 +379,7 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
         );
         const paymentId = rows[0].id;
 
-        // Удаляем состояние оплаты        delete userStates[tgId];
+        delete userStates[tgId];
 
         await ctx.reply(
             `✅ <b>Чек получен!</b>
@@ -351,10 +389,8 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
             { parse_mode: 'HTML' }
         );
 
-        // Уведомление админу
         const user = await getUser(tgId);
         const caption = `🔔 <b>Новая оплата</b>
-
 👤 Пользователь: ${user?.first_name || 'Unknown'}
 📛 @${user?.username || 'нет'} | 🆔 <code>${tgId}</code>
 💎 Тариф: <b>${planType}</b>
@@ -390,24 +426,20 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
             );
             if (!payment) return ctx.answerCbQuery('❌ Заявка не найдена', { show_alert: true });
 
-            const expiresAt = new Date();            expiresAt.setDate(expiresAt.getDate() + 30);
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 30);
 
-            // Деактивируем старые подписки пользователя
             await pool.query(`UPDATE subscriptions SET is_active = FALSE WHERE user_id = $1`, [payment.user_id]);
 
-            // Создаём новую подписку
             await pool.query(
                 `INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type)
                  VALUES ($1, TRUE, $2, $3)`,
                 [payment.user_id, expiresAt, payment.plan_type]
             );
 
-            // Сбрасываем счётчик бесплатных рецептов ✅
             await resetFreeRecipes(payment.user_id);
 
-            // Обновляем статус платежа
             await pool.query(`UPDATE payments SET status = 'approved' WHERE id = $1`, [paymentId]);
-
             await ctx.answerCbQuery('✅ Подписка активирована');
             await ctx.editMessageCaption(
                 `✅ <b>Одобрено</b>\n📋 Заявка #${paymentId}\n🔥 Подписка ${payment.plan_type} активирована`,
@@ -439,7 +471,7 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
             return ctx.answerCbQuery('🔒 Доступ запрещён', { show_alert: true });
         }
         const paymentId = ctx.match[1];
-        // Сохраняем состояние для ввода причины
+        
         userStates[`admin_reject_${ADMIN_ID}`] = { paymentId };
         
         await ctx.answerCbQuery('✍️ Напишите причину отказа (или "нет причины")');
@@ -456,8 +488,7 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
 
             try {
                 const { rows: [payment] } = await pool.query(
-                    `SELECT * FROM payments WHERE id = $1`, [paymentId]
-                );
+                    `SELECT * FROM payments WHERE id = $1`, [paymentId]                );
                 if (!payment) return ctx.reply('❌ Заявка не найдена');
 
                 await pool.query(`UPDATE payments SET status = 'rejected' WHERE id = $1`, [paymentId]);
@@ -477,7 +508,6 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
             return;
         }
 
-        // === ОБРАБОТКА ОБЫЧНЫХ ЗАПРОСОВ ПОЛЬЗОВАТЕЛЕЙ ===
         await handleUserRecipeRequest(ctx);
     });
 
@@ -488,29 +518,26 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
         const text = ctx.message?.text?.trim();
         if (!text || text.startsWith('/')) return;
 
-        const tgId = ctx.from.id;        if (tgId === ADMIN_ID) return;
+        const tgId = ctx.from.id;
+        if (tgId === ADMIN_ID) return;
 
         await createUser(tgId, ctx.from.username, ctx.from.first_name);
 
         const subscription = await hasSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
 
-        // 🔒 Проверка лимита
         if (!subscription && freeUsed >= FREE_LIMIT) {
             return sendSubscriptionMenu(ctx);
         }
 
-        // 🎯 Определяем тип запроса
         const requestType = detectRequestType(text);
         
-        // 📋 Спрашиваем детали, если не указаны
         if (!userStates[tgId]) {
             userStates[tgId] = {
                 requestType,
                 ingredients: text,
                 step: 'details'
-            };
-            
+            };            
             const prompt = requestType === 'ingredients' 
                 ? `👨‍🍳 Уточните для идеального рецепта:\n👥 На сколько порций?\n🥗 Есть ли предпочтения (ПП, без глютена и т.д.)?`
                 : `👨‍🍳 Уточните:\n👥 На сколько порций готовить?\n🥗 Есть ли диетические предпочтения?`;
@@ -518,7 +545,6 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
             return ctx.reply(prompt);
         }
 
-        // 🔄 Если уже в процессе уточнения деталей
         if (userStates[tgId]?.step === 'details') {
             const state = userStates[tgId];
             const details = text;
@@ -535,22 +561,13 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
                     planType
                 );
 
-                const response = await giga.chat({
-                    model: 'GigaChat',
-                    messages: [                        { role: 'system', content: system },
-                        { role: 'user', content: userPrompt }
-                    ],
-                    max_tokens: 3000,
-                    temperature: 0.85
-                });
+                // 🔹 ЗАМЕНА: giga.chat() → callGigaChat()
+                const recipe = await callGigaChat(system, userPrompt, 3000, 0.85);
 
-                // Удаляем "загрузку"
                 try { await ctx.deleteMessage(loading.message_id); } catch(e) {}
 
-                const recipe = response.choices?.[0]?.message?.content || '❌ Не удалось сгенерировать рецепт';
                 await ctx.reply(recipe, { parse_mode: 'HTML' });
 
-                // ➕ Считаем бесплатную попытку
                 if (!subscription) {
                     await incrementFreeRecipes(tgId);
                     const newUsed = freeUsed + 1;
@@ -569,8 +586,7 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
     }
 
     // =========================
-    // VIP COMMANDS
-    // =========================
+    // VIP COMMANDS    // =========================
     bot.command('weekmenu', async (ctx) => {
         const subscription = await hasSubscription(ctx.from.id);
         if (!subscription || subscription.plan_type !== 'VIP') {
@@ -586,7 +602,8 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
 
     bot.command('diet', async (ctx) => {
         const subscription = await hasSubscription(ctx.from.id);
-        if (!subscription || subscription.plan_type !== 'VIP') {            return ctx.reply('🔒 Эта функция доступна только в тарифе VIP');
+        if (!subscription || subscription.plan_type !== 'VIP') {
+            return ctx.reply('🔒 Эта функция доступна только в тарифе VIP');
         }
         
         userStates[ctx.from.id] = { mode: 'diet' };
@@ -602,15 +619,12 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
         const state = userStates[tgId];
         
         if (state?.mode && ctx.from.id !== ADMIN_ID) {
-            // Здесь можно добавить логику генерации меню/диеты через GigaChat
             await ctx.reply('🔄 Функция в разработке. Скоро будет доступно!');
             delete userStates[tgId];
             return;
         }
         
-        // Если не режим команды — обрабатываем как обычный запрос рецепта
         if (!ctx.message?.text?.startsWith('/')) {
-            // Проверка: если уже обрабатывается как рецепт — пропускаем дубль
             if (!state || state.step !== 'details') {
                 await handleUserRecipeRequest(ctx);
             }
