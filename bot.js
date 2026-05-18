@@ -145,7 +145,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
         }
     });
 
-    // ===== ОБРАБОТКА СЛОВ "ОПЛАТА", "ПОДПИСКА" =====    bot.hears(/^(оплата|подписка|pro|premium|купить)$/i, async (ctx) => {
+    // ===== ОБРАБОТКА СЛОВ "ОПЛАТА", "ПОДПИСКА" =====    
+    bot.hears(/^(оплата|подписка|pro|premium|купить)$/i, async (ctx) => {
         const tgId = ctx.from.id;
         const hasSub = await hasActiveSubscription(tgId);
         
