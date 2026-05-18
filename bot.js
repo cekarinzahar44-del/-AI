@@ -9,7 +9,7 @@ const SBP_PHONE = process.env.SBP_PHONE || '+79022231321';
 const SBP_RECIPIENT = process.env.SBP_RECIPIENT || 'Ермачкова Алина В.';
 
 // =========================
-// 🔌 GIGACHAT WRAPPER (как в старом коде, но на fetch)
+// 🔌 GIGACHAT API (Native Fetch)
 // =========================
 let cachedToken = null;
 let tokenExpiry = 0;
@@ -35,7 +35,6 @@ async function getGigaToken() {
     return cachedToken;
 }
 
-// 🔹 Объект в стиле старого кода: giga.chat({...})
 const giga = {
     async chat({ model, messages, max_tokens, temperature }) {
         const token = await getGigaToken();
@@ -47,16 +46,15 @@ const giga = {
                 'Accept': 'application/json'
             },
             body: JSON.stringify({ model, messages, max_tokens, temperature })
-        });        const data = await res.json();
-        if (!res.ok) throw new Error(`GigaChat API: ${data.message || res.statusText}`);
+        });
+        const data = await res.json();        if (!res.ok) throw new Error(`GigaChat API: ${data.message || res.statusText}`);
         return data;
     }
 };
 
 // =========================
-// ВАШ КОД НИЖЕ — БЕЗ ИЗМЕНЕНИЙ
+// MAIN MODULE
 // =========================
-
 module.exports = (bot, pool, ADMIN_ID) => {
     console.log('✅ VIP Chef Bot loaded');
     const userStates = {};
@@ -91,12 +89,21 @@ module.exports = (bot, pool, ADMIN_ID) => {
         return rows[0];
     }
 
-    // ===== UI =====
+    // ===== UI: Меню подписок С КНОПКАМИ =====
     async function sendSubscriptionMenu(ctx) {
         return ctx.reply(
-            `🎯 <b>Вы использовали все 3 пробных рецепта!</b>\n\n💳 <b>PRO — ${PRO_PRICE}₽ / месяц</b>\n• Безлимитные запросы\n💎 <b>VIP — ${VIP_PRICE}₽ / месяц</b>\n• Всё из PRO + меню + диетолог + КБЖУ`,
+            `🎯 <b>Вы использовали все 3 пробных рецепта!</b>\n\n` +
+            `Чтобы продолжить пользоваться <b>Шеф-Поваром AI</b>, выберите подписку:\n\n` +
+            `💳 <b>PRO — ${PRO_PRICE}₽ / месяц</b>\n` +
+            `• Неограниченное количество запросов\n` +
+            `• Все базовые рецепты\n\n` +            `💎 <b>VIP — ${VIP_PRICE}₽ / месяц</b>\n` +
+            `• Всё из PRO +\n` +
+            `• 📅 Меню от ИИ\n` +
+            `• 🥗 ИИ-Диетолог\n` +
+            `• 🔢 КБЖУ и калории`,
             {
-                parse_mode: 'HTML',                reply_markup: Markup.inlineKeyboard([
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
                     [Markup.button.callback(`💰 Оплатить PRO версию`, 'pay_pro')],
                     [Markup.button.callback(`💎 Оплатить VIP версию`, 'pay_vip')]
                 ])
@@ -114,171 +121,242 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
         if (subscription) {
             return ctx.reply(
-                `👨‍🍳 <b>Добро пожаловать!</b>\n🔥 Тариф: <b>${subscription.plan_type}</b>\n\n🎯 Напишите ингредиенты или название блюда.`,
+                `👨‍🍳 <b>Добро пожаловать!</b>\n` +
+                `🔥 Ваш тариф: <b>${subscription.plan_type}</b>\n\n` +
+                `🎯 Напишите:\n` +
+                `• Ингредиенты через запятую\n` +
+                `• Или название блюда\n` +
+                `${subscription.plan_type === 'VIP' ? '\n✨ /weekmenu — меню\n✨ /diet — диетолог' : ''}`,
                 { parse_mode: 'HTML' }
             );
         }
         if (freeUsed >= FREE_LIMIT) return sendSubscriptionMenu(ctx);
         const left = FREE_LIMIT - freeUsed;
         ctx.reply(
-            `👨‍🍳 <b>Привет! Я Шеф-Повар AI</b>\n\n🍽 Напишите ингредиенты или блюдо.${left < 3 ? `\n🎁 Осталось: <b>${left}</b>` : ''}`,
+            `👨‍🍳 <b>Привет! Я Шеф-Повар AI</b>\n\n` +
+            `🍽 Напишите:\n` +
+            `• Ингредиенты (курица, рис, морковь)\n` +
+            `• Или блюдо (борщ, паста)\n` +
+            `${left < 3 ? `\n🎁 Осталось рецептов: <b>${left}</b>` : ''}`,
             { parse_mode: 'HTML' }
         );
     });
 
-    // ===== PAYMENT =====
+    // ===== PAYMENT BUTTONS =====
     bot.action('pay_pro', async (ctx) => {
         await ctx.answerCbQuery();
-        userStates[ctx.from.id] = { payingFor: 'PRO', amount: PRO_PRICE };
-        await ctx.editMessageText(
-            `💳 Оплата — ${PRO_PRICE}₽\n\n1️⃣ СБП: <code>${SBP_PHONE}</code>\n👤 ${SBP_RECIPIENT}\n2️⃣ Пришлите чек сюда.\n⏱ Активация ~5 мин.`,
-            { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔙 Назад', 'show_subscriptions')]]) }
+        userStates[ctx.from.id] = { payingFor: 'PRO', amount: PRO_PRICE };        await ctx.editMessageText(
+            `💳 <b>PRO подписка — ${PRO_PRICE}₽/мес</b>\n\n` +
+            `1️⃣ Переведите ${PRO_PRICE}₽ по СБП:\n` +
+            `📱 <code>${SBP_PHONE}</code>\n` +
+            `👤 ${SBP_RECIPIENT}\n` +
+            `🏦 Сбер, ВТБ, Т-банк\n\n` +
+            `2️⃣ Пришлите чек сюда (фото/PDF)\n\n` +
+            `⏱ Активация: ~5 минут`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.callback('🔙 Назад', 'show_subscriptions')]
+                ])
+            }
         );
     });
+
     bot.action('pay_vip', async (ctx) => {
         await ctx.answerCbQuery();
         userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };
         await ctx.editMessageText(
-            `💳 Оплата — ${VIP_PRICE}₽\n\n1️⃣ СБП: <code>${SBP_PHONE}</code>\n👤 ${SBP_RECIPIENT}\n2️⃣ Пришлите чек сюда.\n⏱ Активация ~5 мин.`,
-            { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔙 Назад', 'show_subscriptions')]]) }
+            `💎 <b>VIP подписка — ${VIP_PRICE}₽/мес</b>\n\n` +
+            `1️⃣ Переведите ${VIP_PRICE}₽ по СБП:\n` +
+            `📱 <code>${SBP_PHONE}</code>\n` +
+            `👤 ${SBP_RECIPIENT}\n` +
+            `🏦 Сбер, ВТБ, Т-банк\n\n` +
+            `2️⃣ Пришлите чек сюда (фото/PDF)\n\n` +
+            `⏱ Активация: ~5 минут`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.callback('🔙 Назад', 'show_subscriptions')]
+                ])
+            }
         );
     });
+
     bot.action('show_subscriptions', async (ctx) => {
         await ctx.answerCbQuery();
-        delete userStates[ctx.from.id];        await sendSubscriptionMenu(ctx);
+        delete userStates[ctx.from.id];
+        await sendSubscriptionMenu(ctx);
     });
 
     // ===== RECEIPTS =====
     bot.on(['photo', 'document'], async (ctx) => {
         const tgId = ctx.from.id;
         const state = userStates[tgId];
-        if (!state?.payingFor) return ctx.reply('📎 Чеки принимаю только при оплате.');
-        
-        let fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : ctx.message.document?.file_id;
-        if (!fileId) return;
+        if (!state?.payingFor) return;
+
+        let fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : ctx.message.document?.file_id;        if (!fileId) return;
 
         const { rows } = await pool.query(
-            `INSERT INTO payments (user_id, amount, receipt_file_id, status, plan_type) VALUES ($1, $2, $3, 'pending', $4) RETURNING id`,
+            `INSERT INTO payments (user_id, amount, receipt_file_id, status, plan_type) 
+             VALUES ($1, $2, $3, 'pending', $4) RETURNING id`,
             [tgId, state.amount, fileId, state.payingFor]
         );
         const paymentId = rows[0].id;
         delete userStates[tgId];
 
-        await ctx.reply(`✅ <b>Чек получен!</b>\n📋 Заявка #${paymentId} на проверке.`, { parse_mode: 'HTML' });
+        await ctx.reply(
+            `✅ <b>Чек получен!</b>\n` +
+            `📋 Заявка #${paymentId} на проверке.\n` +
+            `⏱ Обычно 5-10 минут.`,
+            { parse_mode: 'HTML' }
+        );
 
         const user = await getUser(tgId);
-        const caption = `🔔 Оплата\n👤 ${user?.first_name || 'User'} (@${user?.username || 'no'})\n💎 ${state.payingFor} | 💰 ${state.amount}₽\n📋 #${paymentId}`;
-        const keyboard = Markup.inlineKeyboard([[Markup.button.callback('✅ Одобрить', `approve_${paymentId}`), Markup.button.callback('❌ Отклонить', `reject_${paymentId}`)]]);
+        const caption = `🔔 Новая оплата\n` +
+            `👤 ${user?.first_name || 'User'} (@${user?.username || 'no'})\n` +
+            `🆔 ${tgId}\n` +
+            `💎 ${state.payingFor} | 💰 ${state.amount}₽\n` +
+            `📋 #${paymentId}`;
+        const keyboard = Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Одобрить', `approve_${paymentId}`)],
+            [Markup.button.callback('❌ Отклонить', `reject_${paymentId}`)]
+        ]);
 
-        if (ctx.message.photo) await ctx.telegram.sendPhoto(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
-        else await ctx.telegram.sendDocument(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
+        if (ctx.message.photo) {
+            await ctx.telegram.sendPhoto(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
+        } else {
+            await ctx.telegram.sendDocument(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
+        }
     });
 
-    // ===== ADMIN: APPROVE/REJECT =====
+    // ===== ADMIN: APPROVE =====
     bot.action(/^approve_(\d+)$/, async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒 Запрещено', { show_alert: true });
         const pid = ctx.match[1];
         try {
             const { rows: [pay] } = await pool.query(`SELECT * FROM payments WHERE id = $1`, [pid]);
             if (!pay) return ctx.answerCbQuery('❌ Не найдено', { show_alert: true });
-            
-            const expires = new Date(); expires.setDate(expires.getDate() + 30);
+
+            const expires = new Date();
+            expires.setDate(expires.getDate() + 30);
+
             await pool.query(`UPDATE subscriptions SET is_active = FALSE WHERE user_id = $1`, [pay.user_id]);
-            await pool.query(`INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type) VALUES ($1, TRUE, $2, $3)`, [pay.user_id, expires, pay.plan_type]);
+            await pool.query(
+                `INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type) 
+                 VALUES ($1, TRUE, $2, $3)`,                [pay.user_id, expires, pay.plan_type]
+            );
             await resetFreeRecipes(pay.user_id);
             await pool.query(`UPDATE payments SET status = 'approved' WHERE id = $1`, [pid]);
 
             await ctx.answerCbQuery('✅ Активировано');
             await ctx.editMessageCaption(`✅ Одобрено #${pid}\n🔥 ${pay.plan_type}`, { parse_mode: 'HTML' });
-            await ctx.telegram.sendMessage(pay.user_id, `🎉 <b>Подписка активирована!</b>\n🔥 ${pay.plan_type} до ${expires.toLocaleDateString('ru-RU')}`, { parse_mode: 'HTML' });
-        } catch (e) { await ctx.answerCbQuery('❌ Ошибка', { show_alert: true }); }
+            await ctx.telegram.sendMessage(
+                pay.user_id,
+                `🎉 <b>Подписка активирована!</b>\n` +
+                `🔥 Тариф: <b>${pay.plan_type}</b>\n` +
+                `📅 До: ${expires.toLocaleDateString('ru-RU')}\n\n` +
+                `👨‍ Приятного использования!`,
+                { parse_mode: 'HTML' }
+            );
+        } catch (e) {
+            console.error('Approve error:', e);
+            await ctx.answerCbQuery('❌ Ошибка', { show_alert: true });
+        }
     });
 
-    bot.action(/^reject_(\d+)$/, async (ctx) => {        if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒', { show_alert: true });
+    // ===== ADMIN: REJECT =====
+    bot.action(/^reject_(\d+)$/, async (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒', { show_alert: true });
         userStates[`admin_reject_${ADMIN_ID}`] = ctx.match[1];
         await ctx.answerCbQuery('✍️ Напишите причину');
-        await ctx.reply('Причина отклонения #' + ctx.match[1]);
+        await ctx.reply('Введите причину отклонения #' + ctx.match[1]);
     });
 
+    // ===== TEXT HANDLER =====
     bot.on('text', async (ctx) => {
+        const text = ctx.message?.text?.trim();
+        if (!text || text.startsWith('/')) return;
+
+        // Admin reject
         const adminKey = `admin_reject_${ADMIN_ID}`;
         if (ctx.from.id === ADMIN_ID && userStates[adminKey]) {
             const pid = userStates[adminKey];
-            const reason = ctx.message.text.trim();
+            const reason = text;
             delete userStates[adminKey];
             await pool.query(`UPDATE payments SET status = 'rejected' WHERE id = $1`, [pid]);
             await ctx.reply(`❌ Заявка #${pid} отклонена`);
-            const msg = reason.toLowerCase() === 'нет причины' ? `❌ Платёж отклонён.` : `❌ Отклонено.\n📌 Причина: <i>${reason}</i>`;
+            const msg = reason.toLowerCase() === 'нет причины' 
+                ? `❌ Платёж отклонён.` 
+                : `❌ Отклонено.\n📌 Причина: <i>${reason}</i>`;
             try {
                 const { rows: [pay] } = await pool.query(`SELECT user_id FROM payments WHERE id = $1`, [pid]);
                 await ctx.telegram.sendMessage(pay.user_id, msg, { parse_mode: 'HTML' });
             } catch(e) {}
-            return;
-        }
-        await handleUserRecipeRequest(ctx);
+            return;        }
+
+        await handleRecipe(ctx, text);
     });
 
     // ===== RECIPE HANDLER =====
-    async function handleUserRecipeRequest(ctx) {
-        const text = ctx.message?.text?.trim();
-        if (!text || text.startsWith('/')) return;
+    async function handleRecipe(ctx, text) {
         const tgId = ctx.from.id;
         if (tgId === ADMIN_ID) return;
 
         await createUser(tgId, ctx.from.username, ctx.from.first_name);
         const subscription = await hasSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
-        if (!subscription && freeUsed >= FREE_LIMIT) return sendSubscriptionMenu(ctx);
 
-        // 🔹 ОПРЕДЕЛЕНИЕ ТИПА ЗАПРОСА
+        if (!subscription && freeUsed >= FREE_LIMIT) {
+            return sendSubscriptionMenu(ctx);
+        }
+
+        // Determine request type
         const lower = text.toLowerCase();
-        const dishKeywords = ['рецепт', 'приготовь', 'хочу', 'сделай', 'как сделать', 'карбонара', 'борщ', 'паста', 'салат', 'суп', 'котлеты', 'пирог', 'торт', 'десерт', 'запеканка', 'омлет', 'блины', 'рагу', 'гуляш', 'плов', 'уха', 'солянка', 'харчо', 'печенье', 'кекс', 'суфле', 'мусс', 'желе', 'крем'];
+        const dishKeywords = ['рецепт', 'приготовь', 'хочу', 'сделай', 'как сделать', 'карбонара', 'борщ', 'паста', 'салат', 'суп', 'котлеты', 'пирог', 'торт', 'десерт', 'запеканка', 'омлет', 'блины'];
         const isDish = dishKeywords.some(kw => lower.includes(kw));
         const hasCommas = text.includes(',');
-        const ingredientPatterns = /\b(куриц|говядин|свинин|рыб|лук|морков|картофел|помидор|огурц|чеснок|сметан|молок|сыр|яиц|масл|мука|сахар|соль|перец|специ|зелень|капуст|свёкл|фасол|рис|гречк|макарон|лаваш|творог|сливк|йогурт|мед|лимон|апельсин|яблок|груш|банан|клубник|малин|смородин|орех|изюм|шоколад|какао|ванил|кориц|имбирь|базилик|петруш|укроп|кинз|мят|розмарин|тимьян|паприк|куркум|карри|соев|уксус|вин|коньяк|водк|пиво)\b/ig;
+        const ingredientPatterns = /\b(куриц|говядин|свинин|рыб|лук|морков|картофел|помидор|огурц|чеснок|сметан|молок|сыр|яиц|масл|мука|сахар|соль|перец|специ|зелень|капуст|свёкл|фасол|рис|гречк|макарон|творог|сливк|йогурт|мед|лимон|апельсин|яблок|груш|банан|клубник|орех|шоколад|какао|ванил|кориц|имбирь|базилик|петруш|укроп|кинз|мят|паприк|куркум|карри|соев|уксус)\b/ig;
         const requestType = (!isDish && (hasCommas || ingredientPatterns.test(lower))) ? 'ingredients' : 'dish';
 
         if (!userStates[tgId]) {
             userStates[tgId] = { requestType, ingredients: text, step: 'details' };
-            const q = requestType === 'ingredients' 
+            const q = requestType === 'ingredients'
                 ? `👨‍🍳 Уточните:\n👥 На сколько порций?\n🥗 Предпочтения (ПП, без глютена)?`
                 : `👨‍🍳 Уточните:\n👥 На сколько порций?\n🥗 Диетические предпочтения?`;
-            return ctx.reply(q);        }
+            return ctx.reply(q);
+        }
 
         if (userStates[tgId]?.step === 'details') {
             const state = userStates[tgId];
             const details = text;
             delete userStates[tgId];
-            const loading = await ctx.reply('👨‍🍳 Готовлю рецепт...');
+            const loading = await ctx.reply('👨‍ Готовлю рецепт...');
 
             try {
                 const planType = subscription?.plan_type || 'FREE';
                 const isVIP = planType === 'VIP';
                 const isPP = isVIP && details?.toLowerCase().includes('пп');
-                
-                const baseSystem = `Ты — элитный ИИ ШЕФ-ПОВАР${isVIP ? ' и ИИ-ДИЕТОЛОГ' : ''}.
-Твоя задача — создавать идеальные рецепты.
 
-🎯 ОТВЕЧАЙ СТРОГО ПО СТРУКТУРЕ:
-1️⃣ <b>Название блюда</b> (с эмодзи)
-2️⃣ <b>🍽 Вкусное описание</b> (2-3 сочных предложения)
-3️⃣ <b>🛒 Ингредиенты</b> (спроси "На сколько порций?", если не указано, пересчитай граммовки)
-4️⃣ <b>🔥 Метод приготовления</b> (варка/жарка/тушение/запекание)
-5️⃣ <b>👨‍🍳 Пошаговое приготовление</b> (граммы, мл, время, температура, посуда)
-6️⃣ <b>💡 Советы от Шеф-повара ИИ</b> (лайфхаки, замены, ошибки)
-7️⃣ <b>🍷 Идеальные напитки</b> (🍷 Алкогольные + 🧃 Безалкогольные)
-${isVIP ? `\n✨ VIP-ДОПОЛНЕНИЯ:\n• 🥗 КБЖУ на порцию\n• ${isPP ? '• Только ПП-ингредиенты' : ''}` : ''}
-Используй эмодзи. Форматируй жирное через <b>текст</b>. Отвечай строго по структуре.`;
+                const systemPrompt = `Ты — элитный ИИ ШЕФ-ПОВАР${isVIP ? ' и ДИЕТОЛОГ' : ''}.
+Создавай рецепты строго по структуре:
+
+1️⃣ <b>🍽 Название блюда</b>
+2️⃣ <b>Описание</b> (2-3 сочных предложения)3️⃣ <b>🛒 Ингредиенты</b> (с граммовками)
+4️⃣ <b>🔥 Метод</b> (варка/жарка/запекание)
+5️⃣ <b>👨‍🍳 Шаги</b> (подробно, с временем)
+6️⃣ <b>💡 Советы шефа</b>
+7️⃣ <b>🍷 Напитки</b> (🍷 алкоголь + 🧃 безалкогольные)
+${isVIP ? '\n✨ <b>КБЖУ на порцию</b>\n' + (isPP ? '✨ Только ПП-ингредиенты\n' : '') : ''}
+Используй <b>HTML</b> теги. Эмодзи обязательно.`;
 
                 const userPrompt = state.requestType === 'ingredients'
-                    ? `🎯 ЗАДАЧА: Приготовь блюдо ТОЛЬКО из: "${state.ingredients}"\n⚠️ Можно: соль, перец, специи, масло. НЕЛЬЗЯ: другие продукты.\n${details ? `Доп: ${details}` : ''}`
-                    : `🎯 ЗАДАЧА: Рецепт блюда. Запрос: "${state.ingredients}"\nДай классический или авторский рецепт.\n${details ? `Условия: ${details}` : ''}`;
+                    ? `Блюдо ТОЛЬКО из: ${state.ingredients}\nМожно: соль, перец, специи, масло.\n${details || ''}`
+                    : `Рецепт: ${state.ingredients}\n${details || ''}`;
 
-                // 🔹 ВАШ СТАРЫЙ ВЫЗОВ — РАБОТАЕТ!
                 const response = await giga.chat({
                     model: 'GigaChat',
                     messages: [
-                        { role: 'system', content: baseSystem },
+                        { role: 'system', content: systemPrompt },
                         { role: 'user', content: userPrompt }
                     ],
                     max_tokens: 3000,
@@ -286,13 +364,14 @@ ${isVIP ? `\n✨ VIP-ДОПОЛНЕНИЯ:\n• 🥗 КБЖУ на порцию\
                 });
 
                 try { await ctx.deleteMessage(loading.message_id); } catch(e) {}
-                const recipe = response.choices?.[0]?.message?.content || '❌ Не удалось сгенерировать';
+                const recipe = response.choices?.[0]?.message?.content || '❌ Ошибка генерации';
                 await ctx.reply(recipe, { parse_mode: 'HTML' });
 
                 if (!subscription) {
                     await incrementFreeRecipes(tgId);
                     const left = FREE_LIMIT - (freeUsed + 1);
-                    if (left <= 0) await sendSubscriptionMenu(ctx);                }
+                    if (left <= 0) await sendSubscriptionMenu(ctx);
+                }
             } catch (err) {
                 try { await ctx.deleteMessage(loading.message_id); } catch(e) {}
                 console.error('GigaChat error:', err);
@@ -304,17 +383,18 @@ ${isVIP ? `\n✨ VIP-ДОПОЛНЕНИЯ:\n• 🥗 КБЖУ на порцию\
     // ===== VIP COMMANDS =====
     bot.command('weekmenu', async (ctx) => {
         const sub = await hasSubscription(ctx.from.id);
-        if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только в VIP');
+        if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только для VIP');
         userStates[ctx.from.id] = { mode: 'weekmenu' };
         ctx.reply(`📅 <b>Меню на период</b>\nУкажите:\n👥 Человек\n💰 Бюджет\n🥗 Тип\n📆 Период`, { parse_mode: 'HTML' });
     });
+
     bot.command('diet', async (ctx) => {
         const sub = await hasSubscription(ctx.from.id);
-        if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только в VIP');
-        userStates[ctx.from.id] = { mode: 'diet' };
-        ctx.reply(`🥗 <b>ИИ-Диетолог</b>\nУкажите:\n📏 Рост\n⚖️ Вес\n🎂 Возраст\n🎯 Цель`, { parse_mode: 'HTML' });
+        if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только для VIP');        userStates[ctx.from.id] = { mode: 'diet' };
+        ctx.reply(`🥗 <b>ИИ-Диетолог</b>\nУкажите:\n📏 Рост\n⚖️ Вес\n🎂 Возраст\n Цель`, { parse_mode: 'HTML' });
     });
 
+    // Handle VIP command responses
     bot.on('text', async (ctx) => {
         const tgId = ctx.from.id;
         const state = userStates[tgId];
@@ -322,11 +402,6 @@ ${isVIP ? `\n✨ VIP-ДОПОЛНЕНИЯ:\n• 🥗 КБЖУ на порцию\
             await ctx.reply('🔄 Функция в разработке!');
             delete userStates[tgId];
             return;
-        }
-        if (!ctx.message?.text?.startsWith('/')) {
-            if (!state || state.step !== 'details') {
-                await handleUserRecipeRequest(ctx);
-            }
         }
     });
 };
