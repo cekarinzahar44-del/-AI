@@ -1,11 +1,10 @@
+const { Telegraf, Markup } = require('telegraf');
 const crypto = require('crypto');
 
 const GIGA_CREDENTIALS = process.env.GIGACHAT_CREDENTIALS;
-
 const PRO_PRICE = 500;
 const VIP_PRICE = 800;
 const FREE_LIMIT = 3;
-
 const SBP_PHONE = process.env.SBP_PHONE || '+79022231321';
 const SBP_RECIPIENT = process.env.SBP_RECIPIENT || 'Ермачкова Алина В.';
 
@@ -16,944 +15,396 @@ let cachedToken = null;
 let tokenExpiry = 0;
 
 async function getGigaToken() {
-    if (cachedToken && Date.now() < tokenExpiry) {
-        return cachedToken;
-    }
-
-    const res = await fetch(
-        'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
-                'Authorization': `Basic ${GIGA_CREDENTIALS}`,
-                'RqUID': crypto.randomUUID()
-            },
-            body: 'scope=GIGACHAT_API_PERS'
-        }
-    );
-
+    if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+    const res = await fetch('https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+            'Authorization': `Basic ${GIGA_CREDENTIALS}`,
+            'RqUID': crypto.randomUUID()
+        },
+        body: 'scope=GIGACHAT_API_PERS'
+    });
     const data = await res.json();
-
-    if (!res.ok) {
-        throw new Error(`GigaChat Auth: ${data.message || res.statusText}`);
-    }
-
+    if (!res.ok) throw new Error(`GigaChat Auth: ${data.message || res.statusText}`);
     cachedToken = data.access_token;
     tokenExpiry = Date.now() + (data.expires_at - 30) * 1000;
-
     return cachedToken;
 }
 
 async function callGigaChat(systemPrompt, userPrompt) {
     const token = await getGigaToken();
-
-    const res = await fetch(
-        'https://gigachat.devices.sberbank.ru/api/v1/chat/completions',
-        {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'GigaChat',
-                temperature: 0.8,
-                max_tokens: 3000,
-                messages: [
-                    {
-                        role: 'system',
-                        content: systemPrompt
-                    },
-                    {
-                        role: 'user',
-                        content: userPrompt
-                    }
-                ]
-            })
-        }
-    );
-
+    const res = await fetch('https://gigachat.devices.sberbank.ru/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+            model: 'GigaChat',
+            temperature: 0.8,
+            max_tokens: 3000,
+            messages: [
+                { role: 'system', content: systemPrompt },                { role: 'user', content: userPrompt }
+            ]
+        })
+    });
     const data = await res.json();
-
-    if (!res.ok) {
-        throw new Error(`GigaChat API: ${data.message || res.statusText}`);
-    }
-
+    if (!res.ok) throw new Error(`GigaChat API: ${data.message || res.statusText}`);
     return data.choices[0].message.content;
 }
 
 // =========================
-// CLEAN HTML
+// CLEAN HTML + AUTO-FIX
 // =========================
 function cleanHtml(text) {
     if (!text) return '';
-
-    return text
-        .replace(/```html/gi, '')
-        .replace(/```/g, '')
-        .replace(/<style[\s\S]*?<\/style>/gi, '')
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<html[\s\S]*?>/gi, '')
-        .replace(/<\/html>/gi, '')
-        .replace(/<body[\s\S]*?>/gi, '')
-        .replace(/<\/body>/gi, '')
+    let safeText = text
+        .replace(/```html/gi, '').replace(/```/g, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<html[\s\S]*?>/gi, '').replace(/<\/html>/gi, '')
+        .replace(/<body[\s\S]*?>/gi, '').replace(/<\/body>/gi, '')
         .replace(/<head[\s\S]*?<\/head>/gi, '')
-        .replace(/<h1>/gi, '<b>')
-        .replace(/<\/h1>/gi, '</b>\n')
-        .replace(/<h2>/gi, '<b>')
-        .replace(/<\/h2>/gi, '</b>\n')
-        .replace(/<ul>/gi, '')
-        .replace(/<\/ul>/gi, '')
-        .replace(/<ol.*?>/gi, '')
-        .replace(/<\/ol>/gi, '')
-        .replace(/<li>/gi, '• ')
-        .replace(/<\/li>/gi, '\n')
+        .replace(/<h1>/gi, '<b>').replace(/<\/h1>/gi, '</b>\n')
+        .replace(/<h2>/gi, '<b>').replace(/<\/h2>/gi, '</b>\n')
+        .replace(/<ul>/gi, '').replace(/<\/ul>/gi, '')
+        .replace(/<ol.*?>/gi, '').replace(/<\/ol>/gi, '')
+        .replace(/<li>/gi, '• ').replace(/<\/li>/gi, '\n')
         .replace(/\*\*/g, '')
-        .replace(/<br>/gi, '\n')
-        .replace(/<br\/>/gi, '\n')
-        .replace(/<br \/>/gi, '\n')
+        .replace(/<br>/gi, '\n').replace(/<br\/>/gi, '\n').replace(/<br \/>/gi, '\n')
         .replace(/&nbsp;/gi, ' ')
-        .replace(/<div>/gi, '')
-        .replace(/<\/div>/gi, '\n')
-        .replace(/class=".*?"/gi, '')
-        .replace(/style=".*?"/gi, '')
+        .replace(/<div>/gi, '').replace(/<\/div>/gi, '\n')
+        .replace(/class=".*?"/gi, '').replace(/style=".*?"/gi, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+    
+    // Авто-закрытие тегов <b>
+    const open = (safeText.match(/<b>/g) || []).length;
+    const close = (safeText.match(/<\/b>/g) || []).length;
+    if (open > close) safeText += '</b>'.repeat(open - close);
+    
+    return safeText;
+}
+
+// =========================
+// 📖 STEP PARSER (НОВОЕ)
+// =========================
+function parseSteps(fullText) {
+    if (!fullText) return ['Текст рецепта не получен.'];
+    
+    // Ищем маркеры "Шаг 1", "Шаг 2", "1.", "2." и т.д.
+    const stepRegex = /(?:Шаг\s*\d+[\.:\s\-]*)|(?:^\d+\.\s)/gim;
+    const parts = fullText.split(stepRegex).filter(p => p.trim().length > 5);    
+    if (parts.length >= 2) return parts.map(p => p.trim());
+    
+    // Фоллбэк: разбиваем по двойным переносам
+    const fallback = fullText.split(/\n\s*\n/).filter(p => p.trim().length > 10);
+    return fallback.length >= 2 ? fallback : [fullText];
+}
+
+// =========================
+// 📖 SEND STEP MESSAGE (НОВОЕ)
+// =========================
+async function sendStepMessage(ctx, tgId) {
+    const state = userStates[tgId];
+    if (!state || state.mode !== 'step_recipe') return;
+
+    const stepText = state.steps[state.currentStep];
+    const progress = `📖 <b>${state.title}</b>\n⏳ Шаг ${state.currentStep + 1} из ${state.total}`;
+
+    const keyboard = {
+        inline_keyboard: [
+            [
+                { text: state.currentStep === 0 ? '⏮ Начало' : '⬅️ Назад', callback_data: state.currentStep === 0 ? 'step_none' : 'step_prev' },
+                { text: state.currentStep === state.total - 1 ? '🏁 Готово' : 'Далее ➡️', callback_data: state.currentStep === state.total - 1 ? 'step_none' : 'step_next' }
+            ],
+            [
+                { text: '📜 Весь рецепт', callback_data: 'step_full' },
+                { text: '🗑 Закрыть', callback_data: 'step_close' }
+            ]
+        ]
+    };
+
+    try {
+        if (ctx.update?.callback_query) {
+            await ctx.editMessageText(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
+        } else {
+            await ctx.reply(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
+        }
+    } catch (e) {
+        await ctx.reply(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
+    }
 }
 
 // =========================
 // EXPORT
 // =========================
 module.exports = (bot, pool, ADMIN_ID) => {
-
     console.log('✅ VIP Chef Bot loaded');
-
     const userStates = {};
 
-    // =========================
-    // REQUEST TYPE
+    // =========================    // REQUEST TYPE
     // =========================
     function detectRequestType(text) {
         const lower = text.toLowerCase();
-
-        const dishKeywords = [
-            'рецепт',
-            'приготовь',
-            'хочу',
-            'сделай',
-            'как сделать',
-            'борщ',
-            'салат',
-            'суп',
-            'паста',
-            'карбонара',
-            'омлет',
-            'плов',
-            'котлеты',
-            'торт',
-            'десерт'
-        ];
-
-        if (dishKeywords.some(k => lower.includes(k))) {
-            return 'dish';
-        }
-
-        if (text.includes(',')) {
-            return 'ingredients';
-        }
-
+        const dishKeywords = ['рецепт', 'приготовь', 'хочу', 'сделай', 'как сделать', 'борщ', 'салат', 'суп', 'паста', 'карбонара', 'омлет', 'плов', 'котлеты', 'торт', 'десерт'];
+        if (dishKeywords.some(k => lower.includes(k))) return 'dish';
+        if (text.includes(',')) return 'ingredients';
         return 'dish';
     }
 
     // =========================
     // BUILD PROMPT
     // =========================
-// =========================
-// BUILD PROMPT
-// =========================
-function buildPrompt(requestType, ingredients, details, planType) {
-    const isVIP = planType === 'VIP';
-
-    const system = `
+    function buildPrompt(requestType, ingredients, details, planType) {
+        const isVIP = planType === 'VIP';
+        const system = `
 Ты элитный ИИ Шеф-Повар с 20-летним опытом.
 
-ТВОЯ ЗАДАЧА:
-Создавать ПОДРОБНЫЕ рецепты с точными инструкциями.
+ТВОЯ ЗАДАЧА: Создавать ПОДРОБНЫЕ рецепты с точными инструкциями.
 
 ❗ ВАЖНО - КАЖДЫЙ ШАГ ДОЛЖЕН СОДЕРЖАТЬ:
-⏱ ВРЕМЯ (сколько минут/часов)
-🌡 ТЕМПЕРАТУРУ (если нужно)
-🍳 СПОСОБ (жарить/варить/тушить)
-📏 ТОЧНЫЕ ПРОПОРЦИИ
+⏱ ВРЕМЯ | 🌡 ТЕМПЕРАТУРА | 🍳 СПОСОБ | 📏 ПРОПОРЦИИ
 
-СТРУКТУРА ОТВЕТА:
-
+СТРУКТУРА:
 <b>🍽 Название блюда</b>
-
-<b>📝 Описание</b>
-2-3 предложения о блюде
-
-<b>🛒 Ингредиенты</b>
-• продукт — количество (г, мл, шт)
-• продукт — количество
-
-<b>⏱ Общее время</b>
-Подготовка: X мин | Приготовление: Y мин | Всего: Z мин
-
-<b>🔥 Метод приготовления</b>
-Жарка / Варка / Запекание / Тушение
-
+<b>📝 Описание</b> (2-3 предложения)
+<b>🛒 Ингредиенты</b> (• продукт — количество)
+<b>⏱ Общее время</b> (Подготовка / Приготовление / Всего)
+<b>🔥 Метод</b> (Жарка/Варка/Запекание)
 <b>👨‍🍳 Пошаговое приготовление</b>
-
-<b>Шаг 1: Подготовка ингредиентов</b>
-⏱ 5 минут
-• Что делать: подробно
-• Как нарезать: кубики/соломка/кольца
-• Размер: 1-2 см
-
-<b>Шаг 2: Основной процесс</b>
-⏱ 20 минут | 🌡 180°C
-• Что делать: подробно
-• На каком огне: сильный/средний/слабый
-• Как часто мешать: каждые 2-3 минуты
-• Признаки готовности: золотистая корочка
-
-<b>Шаг 3: Финал</b>
-⏱ 5 минут
-• Что добавить
-• Как подать
-
+<b>Шаг 1:</b> ⏱ X мин | 🌡 °C | Описание
+<b>Шаг 2:</b> ⏱ X мин | 🌡 °C | Описание
+...
 <b>💡 Советы шефа</b>
-• Лайфхаки
-• Чем заменить
-• Частые ошибки
-
-<b>🍷 Идеальные напитки</b>
-🍷 Алкогольные: ...
-🧃 Безалкогольные: ...
-
-${isVIP ? '<b>📊 КБЖУ на порцию:</b>\n• Калории: X ккал\n• Белки: X г\n• Жиры: X г\n• Углеводы: X г' : ''}
+<b>🍷 Напитки</b> (🍷 + 🧃)
+${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
 
 ПРАВИЛА:
-✅ Используй ТОЛЬКО теги: <b>
-✅ Каждый шаг с временем ⏱
-✅ Указывай температуру 🌡
-✅ Конкретные размеры и веса
+✅ Только <b> для жирного
+✅ Каждый шаг с ⏱ и 🌡
 ✅ Эмодзи для наглядности
-❌ НЕ используй markdown **
+❌ НЕ используй ** (markdown)
 `;
-
-    if (requestType === 'ingredients') {
-        return {
-            system,
-            user: `Приготовь блюдо ТОЛЬКО из: ${ingredients}\nДополнительно: ${details || 'нет'}`
-        };
+        if (requestType === 'ingredients') {
+            return { system, user: `Блюдо ТОЛЬКО из: ${ingredients}\nДоп: ${details || 'нет'}` };
+        }
+        return { system, user: `Рецепт: ${ingredients}\nДоп: ${details || 'нет'}` };
     }
 
-    return {
-        system,
-        user: `Запрос: ${ingredients}\nДополнительно: ${details || 'нет'}`
-    };
-}
-
-    // =========================
-    // DB HELPERS
+    // =========================    // DB HELPERS
     // =========================
     async function createUser(tgId, username, firstName) {
-        await pool.query(
-            `
-            INSERT INTO users (
-                tg_id,
-                username,
-                first_name,
-                free_recipes_used
-            )
-            VALUES ($1,$2,$3,0)
-            ON CONFLICT (tg_id) DO NOTHING
-            `,
-            [tgId, username, firstName]
-        );
+        await pool.query(`INSERT INTO users (tg_id, username, first_name, free_recipes_used) VALUES ($1,$2,$3,0) ON CONFLICT (tg_id) DO NOTHING`, [tgId, username, firstName]);
     }
-
-    async function getUser(tgId) {
-        const { rows } = await pool.query(
-            `SELECT * FROM users WHERE tg_id = $1`,
-            [tgId]
-        );
-
-        return rows[0];
-    }
-
-    async function getFreeRecipesUsed(tgId) {
-        const user = await getUser(tgId);
-        return user?.free_recipes_used || 0;
-    }
-
-    async function incrementFreeRecipes(tgId) {
-        await pool.query(
-            `
-            UPDATE users
-            SET free_recipes_used = free_recipes_used + 1
-            WHERE tg_id = $1
-            `,
-            [tgId]
-        );
-    }
-
-    async function resetFreeRecipes(tgId) {
-        await pool.query(
-            `
-            UPDATE users
-            SET free_recipes_used = 0
-            WHERE tg_id = $1
-            `,
-            [tgId]
-        );
-    }
-
-    async function hasSubscription(tgId) {
-        const { rows } = await pool.query(
-            `
-            SELECT *
-            FROM subscriptions
-            WHERE user_id = $1
-            AND is_active = TRUE
-            AND expires_at > NOW()
-            LIMIT 1
-            `,
-            [tgId]
-        );
-
-        return rows[0];
-    }
+    async function getUser(tgId) { const { rows } = await pool.query(`SELECT * FROM users WHERE tg_id = $1`, [tgId]); return rows[0]; }
+    async function getFreeRecipesUsed(tgId) { const u = await getUser(tgId); return u?.free_recipes_used || 0; }
+    async function incrementFreeRecipes(tgId) { await pool.query(`UPDATE users SET free_recipes_used = free_recipes_used + 1 WHERE tg_id = $1`, [tgId]); }
+    async function resetFreeRecipes(tgId) { await pool.query(`UPDATE users SET free_recipes_used = 0 WHERE tg_id = $1`, [tgId]); }
+    async function hasSubscription(tgId) { const { rows } = await pool.query(`SELECT * FROM subscriptions WHERE user_id = $1 AND is_active = TRUE AND expires_at > NOW() LIMIT 1`, [tgId]); return rows[0]; }
 
     // =========================
     // SUB MENU
     // =========================
     async function sendSubscriptionMenu(ctx) {
-
-        return ctx.reply(
-            `🎯 <b>Пробный лимит закончился</b>
-
-Выберите подписку:
-
-💳 <b>PRO — ${PRO_PRICE}₽</b>
-
-💎 <b>VIP — ${VIP_PRICE}₽</b>
-• ИИ диетолог
-• КБЖУ
-• Меню на неделю
-`,
-            {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: '💰 Купить PRO',
-                                callback_data: 'pay_pro'
-                            }
-                        ],
-                        [
-                            {
-                                text: '💎 Купить VIP',
-                                callback_data: 'pay_vip'
-                            }
-                        ]
-                    ]
-                }
-            }
-        );
+        return ctx.reply(`🎯 <b>Пробный лимит закончился</b>\n\n💳 <b>PRO — ${PRO_PRICE}₽</b>\n\n💎 <b>VIP — ${VIP_PRICE}₽</b>\n• ИИ диетолог\n• КБЖУ\n• Меню`, {
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: [[{ text: '💰 Купить PRO', callback_data: 'pay_pro' }], [{ text: '💎 Купить VIP', callback_data: 'pay_vip' }]] }
+        });
     }
 
-    // =========================
-    // PAYMENT TEXT
-    // =========================
     function getPaymentInstruction(planType, amount) {
-
-        return `
-💳 <b>Оплата ${planType}</b>
-
-Сумма: <b>${amount}₽</b>
-
-📱 Номер:
-<code>${SBP_PHONE}</code>
-
-👤 Получатель:
-${SBP_RECIPIENT}
-
-После оплаты отправьте чек.
-`;
+        return `💳 <b>Оплата ${planType}</b>\n\nСумма: <b>${amount}₽</b>\n📱 <code>${SBP_PHONE}</code>\n👤 ${SBP_RECIPIENT}\n\nПосле оплаты отправьте чек.`;
     }
 
     // =========================
     // START
     // =========================
     bot.start(async (ctx) => {
-
         if (ctx.from.id === ADMIN_ID) return;
-
         const tgId = ctx.from.id;
-
-        await createUser(
-            tgId,
-            ctx.from.username,
-            ctx.from.first_name
-        );
-
+        await createUser(tgId, ctx.from.username, ctx.from.first_name);
         const subscription = await hasSubscription(tgId);
-
         const freeUsed = await getFreeRecipesUsed(tgId);
-
-        if (subscription) {
-
-            return ctx.reply(
-                `
-👨‍🍳 <b>Добро пожаловать!</b>
-
-🔥 Тариф:
-<b>${subscription.plan_type}</b>
-
-Напишите рецепт или ингредиенты.
-`,
-                {
-                    parse_mode: 'HTML'
-                }
-            );
-        }
-
-        if (freeUsed >= FREE_LIMIT) {
-            return sendSubscriptionMenu(ctx);
-        }
-
-        const left = FREE_LIMIT - freeUsed;
-
-        await ctx.reply(
-            `
-👨‍🍳 <b>Шеф-Повар AI</b>
-
-🍽 Осталось бесплатных рецептов:
-<b>${left}</b>
-`,
-            {
-                parse_mode: 'HTML'
-            }
-        );
+        if (subscription) return ctx.reply(`👨‍🍳 <b>Добро пожаловать!</b>\n🔥 Тариф: <b>${subscription.plan_type}</b>\n\nНапишите рецепт.`, { parse_mode: 'HTML' });
+        if (freeUsed >= FREE_LIMIT) return sendSubscriptionMenu(ctx);
+        await ctx.reply(`👨‍🍳 <b>Шеф-Повар AI</b>\n\n🍽 Осталось: <b>${FREE_LIMIT - freeUsed}</b>`, { parse_mode: 'HTML' });
     });
 
     // =========================
     // PAY BUTTONS
     // =========================
     bot.action('pay_pro', async (ctx) => {
-
         await ctx.answerCbQuery();
-
-        userStates[ctx.from.id] = {
-            payingFor: 'PRO',
-            amount: PRO_PRICE
-        };
-
-        await ctx.editMessageText(
-            getPaymentInstruction('PRO', PRO_PRICE),
-            {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: '🔙 Назад',
-                                callback_data: 'show_subscriptions'
-                            }
-                        ]
-                    ]
-                }
-            }
-        );
+        userStates[ctx.from.id] = { payingFor: 'PRO', amount: PRO_PRICE };
+        await ctx.editMessageText(getPaymentInstruction('PRO', PRO_PRICE), { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'show_subscriptions' }]] } });
     });
-
     bot.action('pay_vip', async (ctx) => {
-
         await ctx.answerCbQuery();
-
-        userStates[ctx.from.id] = {
-            payingFor: 'VIP',
-            amount: VIP_PRICE
-        };
-
-        await ctx.editMessageText(
-            getPaymentInstruction('VIP', VIP_PRICE),
-            {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: '🔙 Назад',
-                                callback_data: 'show_subscriptions'
-                            }
-                        ]
-                    ]
-                }
-            }
-        );
+        userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };        await ctx.editMessageText(getPaymentInstruction('VIP', VIP_PRICE), { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'show_subscriptions' }]] } });
     });
-
     bot.action('show_subscriptions', async (ctx) => {
-
-        await ctx.answerCbQuery();
-
-        delete userStates[ctx.from.id];
-
-        await sendSubscriptionMenu(ctx);
+        await ctx.answerCbQuery(); delete userStates[ctx.from.id]; await sendSubscriptionMenu(ctx);
     });
 
-// =========================
-// RECEIPTS + ADMIN NOTIFY FIX
-// =========================
-bot.on(['photo', 'document'], async (ctx) => {
-
-    const tgId = ctx.from.id;
-    const state = userStates[tgId];
-
-    if (!state?.payingFor) {
-        return ctx.reply('📎 Чек принимается только при оплате подписки.');
-    }
-
-    let fileId = null;
-
-    if (ctx.message.photo) {
-        fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-    }
-
-    if (ctx.message.document) {
-        fileId = ctx.message.document.file_id;
-    }
-
-    if (!fileId) return;
+    // =========================
+    // RECEIPTS
+    // =========================
+    bot.on(['photo', 'document'], async (ctx) => {
+        const tgId = ctx.from.id; const state = userStates[tgId];
+        if (!state?.payingFor) return ctx.reply('📎 Чек — только при оплате.');
+        let fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length-1].file_id : ctx.message.document?.file_id;
+        if (!fileId) return;
+        const { rows } = await pool.query(`INSERT INTO payments (user_id, amount, receipt_file_id, status, plan_type) VALUES ($1,$2,$3,'pending',$4) RETURNING id`, [tgId, state.amount, fileId, state.payingFor]);
+        const paymentId = rows[0].id; delete userStates[tgId];
+        await ctx.reply(`✅ <b>Чек принят!</b>\n📋 #${paymentId}`, { parse_mode: 'HTML' });
+        const user = await getUser(tgId);
+        const caption = `🚨 Заявка #${paymentId}\n👤 ${user?.first_name}\n💎 ${state.payingFor} | 💰 ${state.amount}₽`;
+        const keyboard = { inline_keyboard: [[{ text: '✅ Одобрить', callback_data: `approve_${paymentId}` }], [{ text: '❌ Отклонить', callback_data: `reject_${paymentId}` }]] };
+        try {
+            if (ctx.message.photo) await ctx.telegram.sendPhoto(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
+            else await ctx.telegram.sendDocument(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
+        } catch(e) { console.error('ADMIN ERROR:', e); }
+    });
 
     // =========================
-    // SAVE PAYMENT
-    // =========================
-    const { rows } = await pool.query(
-        `
-        INSERT INTO payments (
-            user_id,
-            amount,
-            receipt_file_id,
-            status,
-            plan_type
-        )
-        VALUES ($1,$2,$3,'pending',$4)
-        RETURNING id
-        `,
-        [
-            tgId,
-            state.amount,
-            fileId,
-            state.payingFor
-        ]
-    );
-
-    const paymentId = rows[0].id;
-
-    delete userStates[tgId];
-
-    // =========================
-    // USER RESPONSE
-    // =========================
-    await ctx.reply(
-        `✅ <b>Чек получен!</b>\n📋 Заявка #${paymentId}\n⏳ Ожидайте подтверждения`,
-        { parse_mode: 'HTML' }
-    );
-
-    // =========================
-    // GET USER INFO
-    // =========================
-    const user = await getUser(tgId);
-
-    // =========================
-    // ADMIN MESSAGE (FIX HERE)
-    // =========================
-    const adminCaption =
-`🚨 <b>НОВАЯ ЗАЯВКА НА ПОДПИСКУ</b>
-
-📋 Заявка: #${paymentId}
-👤 Пользователь: ${user?.first_name || 'Unknown'}
-📛 @${user?.username || 'нет'}
-🆔 ID: <code>${tgId}</code>
-
-💎 Тариф: <b>${state.payingFor}</b>
-💰 Сумма: <b>${state.amount}₽</b>`;
-
-    const adminKeyboard = {
-        inline_keyboard: [
-            [
-                { text: '✅ Одобрить', callback_data: `approve_${paymentId}` }
-            ],
-            [
-                { text: '❌ Отклонить', callback_data: `reject_${paymentId}` }
-            ]
-        ]
-    };
-
-    // =========================
-    // SEND TO ADMIN
-    // =========================
-    try {
-        if (ctx.message.photo) {
-            await ctx.telegram.sendPhoto(
-                ADMIN_ID,
-                fileId,
-                {
-                    caption: adminCaption,
-                    parse_mode: 'HTML',
-                    reply_markup: adminKeyboard
-                }
-            );
-        } else {
-            await ctx.telegram.sendDocument(
-                ADMIN_ID,
-                fileId,
-                {
-                    caption: adminCaption,
-                    parse_mode: 'HTML',
-                    reply_markup: adminKeyboard
-                }
-            );
-        }
-    } catch (e) {
-        console.error('ADMIN NOTIFY ERROR:', e);
-    }
-});
-
-    // =========================
-    // MAIN TEXT
+    // MAIN TEXT + STEP MODE
     // =========================
     bot.on('text', async (ctx) => {
-
         const text = ctx.message.text?.trim();
-
-        if (!text) return;
-
-        if (text.startsWith('/')) return;
-
+        if (!text || text.startsWith('/')) return;
         const tgId = ctx.from.id;
-
         if (tgId === ADMIN_ID) return;
 
-        await createUser(
-            tgId,
-            ctx.from.username,
-            ctx.from.first_name
-        );
-
-        const subscription = await hasSubscription(tgId);
-
-        const freeUsed = await getFreeRecipesUsed(tgId);
-
-        if (!subscription && freeUsed >= FREE_LIMIT) {
-            return sendSubscriptionMenu(ctx);
+        // Admin reject reason
+        const adminKey = `admin_reject_${ADMIN_ID}`;
+        if (userStates[adminKey]) {
+            const pid = userStates[adminKey].paymentId;
+            delete userStates[adminKey];
+            await pool.query(`UPDATE payments SET status = 'rejected' WHERE id = $1`, [pid]);
+            await ctx.reply(`❌ #${pid} отклонена`);
+            try { const { rows: [p] } = await pool.query(`SELECT user_id FROM payments WHERE id = $1`, [pid]); await ctx.telegram.sendMessage(p.user_id, `❌ Отклонено.\nПричина: ${text}`); } catch(e){}
+            return;
         }
 
+        await createUser(tgId, ctx.from.username, ctx.from.first_name);
+        const subscription = await hasSubscription(tgId);
+        const freeUsed = await getFreeRecipesUsed(tgId);
+        if (!subscription && freeUsed >= FREE_LIMIT) return sendSubscriptionMenu(ctx);
         const state = userStates[tgId];
 
-        // STEP 1
+        // STEP 1: Запрос деталей
         if (!state) {
-
-            const requestType = detectRequestType(text);
-
-            userStates[tgId] = {
-                requestType,
-                ingredients: text,
-                step: 'details'
-            };
-
-            return ctx.reply(
-                `
-👨‍🍳 Укажите:
-
-👥 Количество порций
-🥗 Предпочтения
-`,
-                {
-                    parse_mode: 'HTML',
-                    reply_markup: {
-                        keyboard: [
-                            ['🥗 ПП'],
-                            ['🔥 Низкокалорийное'],
-                            ['💪 Набор массы']
-                        ],
-                        resize_keyboard: true
-                    }
-                }
-            );
+            userStates[tgId] = { requestType: detectRequestType(text), ingredients: text, step: 'details' };
+            return ctx.reply(`👨‍🍳 Укажите:\n👥 Порций?\n🥗 Предпочтения?`, { parse_mode: 'HTML', reply_markup: { keyboard: [['🥗 ПП'], ['🔥 Быстро'], ['💰 Бюджетно']], resize_keyboard: true } });
         }
 
-        // STEP 2
+        // STEP 2: Генерация рецепта
         if (state.step === 'details') {
-
             delete userStates[tgId];
-
-            const loading = await ctx.reply(
-                '👨‍🍳 Готовлю рецепт...'
-            );
-
+            const loading = await ctx.reply('👨‍🍳 Готовлю...');
             try {
-
-                const planType =
-                    subscription?.plan_type || 'FREE';
-
-                const prompt = buildPrompt(
-                    state.requestType,
-                    state.ingredients,
-                    text,
-                    planType
-                );
-
-                let recipe = await callGigaChat(
-                    prompt.system,
-                    prompt.user
-                );
-
+                const planType = subscription?.plan_type || 'FREE';
+                const prompt = buildPrompt(state.requestType, state.ingredients, text, planType);
+                let recipe = await callGigaChat(prompt.system, prompt.user);
                 recipe = cleanHtml(recipe);
+                try { await ctx.deleteMessage(loading.message_id); } catch {}
 
-                try {
-                    await ctx.deleteMessage(
-                        loading.message_id
-                    );
-                } catch {}
+                // 🔹 ВКЛЮЧАЕМ ПОШАГОВЫЙ РЕЖИМ
+                const steps = parseSteps(recipe);
+                const titleMatch = recipe.match(/<b>.*?[🍽🍰].*?<\/b>/i);
+                const title = titleMatch ? titleMatch[0].replace(/<\/?b>/g, '') : 'Твой рецепт';
 
-                await ctx.reply(
-                    recipe,
-                    {
-                        parse_mode: 'HTML',
-                        reply_markup: {
-                            keyboard: [
-                                ['🍽 Новый рецепт'],
-                                ['📅 Меню на неделю'],
-                                ['💎 VIP']
-                            ],
-                            resize_keyboard: true
-                        }
-                    }
-                );
+                userStates[tgId] = { mode: 'step_recipe', steps: steps.map(s => cleanHtml(s)), currentStep: 0, title, total: steps.length };
+                await sendStepMessage(ctx, tgId);
 
                 if (!subscription) {
-
                     await incrementFreeRecipes(tgId);
-
-                    const newUsed = freeUsed + 1;
-
-                    if (newUsed >= FREE_LIMIT) {
-                        await sendSubscriptionMenu(ctx);
-                    }
+                    if (getFreeRecipesUsed(tgId) >= FREE_LIMIT) await sendSubscriptionMenu(ctx);
                 }
-
             } catch (err) {
-
-                console.error(err);
-
-                await ctx.reply(
-                    `
-❌ Ошибка генерации рецепта
-
-${err.message}
-`
-                );
+                try { await ctx.deleteMessage(loading.message_id); } catch {}
+                console.error('GigaChat error:', err);
+                await ctx.reply('❌ Ошибка генерации. Попробуй позже.');
             }
         }
     });
 
     // =========================
-    // VIP MENU
+    // 📖 STEP NAVIGATION (НОВОЕ)
+    // =========================
+    bot.action(/^step_(next|prev|full|close|none)$/, async (ctx) => {
+        const action = ctx.match[1];
+        const tgId = ctx.from.id;
+        const state = userStates[tgId];
+        if (!state || state.mode !== 'step_recipe') return ctx.answerCbQuery('⚠️ Режим не активен');
+
+        if (action === 'next' && state.currentStep < state.total - 1) state.currentStep++;        else if (action === 'prev' && state.currentStep > 0) state.currentStep--;
+        else if (action === 'full') {
+            const full = state.steps.join('\n\n---\n\n');
+            await ctx.editMessageText(`📜 <b>${state.title}</b>\n\n${cleanHtml(full)}`, { parse_mode: 'HTML' });
+            delete userStates[tgId];
+            return ctx.answerCbQuery('📜 Показан полный рецепт');
+        }
+        else if (action === 'close') {
+            delete userStates[tgId];
+            return ctx.editMessageText('✅ Режим закрыт. Напиши новый запрос.', { reply_markup: { remove_keyboard: true } });
+        }
+
+        if (action !== 'none') await sendStepMessage(ctx, tgId);
+        await ctx.answerCbQuery();
+    });
+
+    // =========================
+    // VIP COMMANDS
     // =========================
     bot.command('weekmenu', async (ctx) => {
-
-        const subscription =
-            await hasSubscription(ctx.from.id);
-
-        if (
-            !subscription ||
-            subscription.plan_type !== 'VIP'
-        ) {
-            return ctx.reply(
-                '🔒 Только для VIP'
-            );
-        }
-
-        await ctx.reply(
-            `
-📅 Укажите:
-
-• Количество человек
-• Период
-• Тип питания
-`,
-            {
-                parse_mode: 'HTML'
-            }
-        );
+        const sub = await hasSubscription(ctx.from.id);
+        if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только VIP');
+        ctx.reply('📅 Меню (в разработке)', { parse_mode: 'HTML' });
     });
-
-    // =========================
-    // DIET
-    // =========================
     bot.command('diet', async (ctx) => {
-
-        const subscription =
-            await hasSubscription(ctx.from.id);
-
-        if (
-            !subscription ||
-            subscription.plan_type !== 'VIP'
-        ) {
-            return ctx.reply(
-                '🔒 Только для VIP'
-            );
-        }
-
-        await ctx.reply(
-            `
-🥗 Укажите:
-
-• Рост
-• Вес
-• Возраст
-• Цель
-`,
-            {
-                parse_mode: 'HTML'
-            }
-        );
+        const sub = await hasSubscription(ctx.from.id);
+        if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только VIP');
+        ctx.reply('🥗 Диетолог (в разработке)', { parse_mode: 'HTML' });
     });
+
     // =========================
-    // ✅ ADMIN: APPROVE PAYMENT
-    // =========================
-// =========================
-    // ✅ ADMIN APPROVE
+    // ✅ ADMIN: APPROVE
     // =========================
     bot.action(/^approve_(\d+)$/, async (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) {
-            return ctx.answerCbQuery('🔒 Запрещено', { show_alert: true });
-        }
-
+        if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒', { show_alert: true });
         const paymentId = ctx.match[1];
-        console.log('🔄 ОДОБРЕНИЕ заявки #', paymentId);
-
         try {
-            const { rows: [payment] } = await pool.query(
-                `SELECT * FROM payments WHERE id = $1`,
-                [paymentId]
-            );
-
-            if (!payment) {
-                return ctx.answerCbQuery('❌ Не найдено', { show_alert: true });
-            }
-
-            const userId = payment.user_id;
-            const planType = payment.plan_type;
-
-            // Деактивируем старые
-            await pool.query(
-                `UPDATE subscriptions SET is_active = FALSE WHERE user_id = $1`,
-                [userId]
-            );
-
-            // Создаём новую (30 дней)
-            const expiresAt = new Date();
-            expiresAt.setDate(expiresAt.getDate() + 30);
-
-            await pool.query(
-                `INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type)
-                 VALUES ($1, TRUE, $2, $3)`,
-                [userId, expiresAt, planType]
-            );
-
-            // Сброс счётчика
-            await pool.query(
-                `UPDATE users SET free_recipes_used = 0 WHERE tg_id = $1`,
-                [userId]
-            );
-
-            // Статус платежа
-            await pool.query(
-                `UPDATE payments SET status = 'approved' WHERE id = $1`,
-                [paymentId]            );
-
-            // Уведомление админу
-            await ctx.answerCbQuery('✅ Активировано');
-            await ctx.editMessageCaption(
-                `✅ <b>Одобрено</b>\n📋 #${paymentId}\n🔥 ${planType}`,
-                { parse_mode: 'HTML' }
-            );
-
-            // Уведомление пользователю
-            await ctx.telegram.sendMessage(
-                userId,
-                `🎉 <b>Подписка активирована!</b>\n\n` +
-                `🔥 Тариф: <b>${planType}</b>\n` +
-                `📅 До: ${expiresAt.toLocaleDateString('ru-RU')}\n\n` +
-                `👨‍🍳 Приятного использования!`,
-                { parse_mode: 'HTML' }
-            );
-
-            console.log('✅ Подписка активирована для', userId);
-
-        } catch (err) {
-            console.error('❌ APPROVE ERROR:', err);
-            await ctx.answerCbQuery('❌ Ошибка', { show_alert: true });
-        }
+            const { rows: [payment] } = await pool.query(`SELECT * FROM payments WHERE id = $1`, [paymentId]);
+            if (!payment) return ctx.answerCbQuery('❌', { show_alert: true });
+            const userId = payment.user_id, planType = payment.plan_type;
+            await pool.query(`UPDATE subscriptions SET is_active = FALSE WHERE user_id = $1`, [userId]);
+            const expiresAt = new Date(); expiresAt.setDate(expiresAt.getDate() + 30);
+            await pool.query(`INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type) VALUES ($1, TRUE, $2, $3)`, [userId, expiresAt, planType]);
+            await pool.query(`UPDATE users SET free_recipes_used = 0 WHERE tg_id = $1`, [userId]);
+            await pool.query(`UPDATE payments SET status = 'approved' WHERE id = $1`, [paymentId]);
+            await ctx.answerCbQuery('✅');
+            await ctx.editMessageCaption(`✅ #${paymentId}\n🔥 ${planType}`, { parse_mode: 'HTML' });
+            await ctx.telegram.sendMessage(userId, `🎉 <b>${planType} активирована!</b>\n📅 До: ${expiresAt.toLocaleDateString('ru-RU')}`, { parse_mode: 'HTML' });
+        } catch(e) { await ctx.answerCbQuery('❌', { show_alert: true }); }
     });
-
     // =========================
-    // ❌ ADMIN REJECT
+    // ❌ ADMIN: REJECT
     // =========================
     bot.action(/^reject_(\d+)$/, async (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) {
-            return ctx.answerCbQuery('🔒 Запрещено', { show_alert: true });
-        }
-
+        if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒', { show_alert: true });
         const paymentId = ctx.match[1];
-        console.log('🔄 ОТКЛОНЕНИЕ заявки #', paymentId);
-
         try {
-            const { rows: [payment] } = await pool.query(
-                `SELECT * FROM payments WHERE id = $1`,
-                [paymentId]
-            );
-
-            if (!payment) {
-                return ctx.answerCbQuery('❌ Не найдено', { show_alert: true });
-            }
-
-            const userId = payment.user_id;
-            await pool.query(
-                `UPDATE payments SET status = 'rejected' WHERE id = $1`,
-                [paymentId]
-            );
-
-            await ctx.answerCbQuery('❌ Отклонено');
-            await ctx.editMessageCaption(
-                `❌ <b>Отклонено</b>\n📋 #${paymentId}`,
-                { parse_mode: 'HTML' }
-            );
-
-            await ctx.telegram.sendMessage(
-                userId,
-                `❌ <b>Платёж отклонён</b>\n\n` +
-                `📋 Заявка #${paymentId}\n\n` +
-                `Проверь чек и попробуй снова.`,
-                { parse_mode: 'HTML' }
-            );
-
-            console.log('❌ Заявка отклонена');
-
-        } catch (err) {
-            console.error('❌ REJECT ERROR:', err);
-            await ctx.answerCbQuery('❌ Ошибка', { show_alert: true });
-        }
+            const { rows: [payment] } = await pool.query(`SELECT * FROM payments WHERE id = $1`, [paymentId]);
+            if (!payment) return ctx.answerCbQuery('❌', { show_alert: true });
+            await pool.query(`UPDATE payments SET status = 'rejected' WHERE id = $1`, [paymentId]);
+            await ctx.answerCbQuery('❌');
+            await ctx.editMessageCaption(`❌ #${paymentId}`, { parse_mode: 'HTML' });
+            await ctx.telegram.sendMessage(payment.user_id, `❌ Отклонено.\n📋 #${paymentId}`, { parse_mode: 'HTML' });
+        } catch(e) { await ctx.answerCbQuery('❌', { show_alert: true }); }
     });
+
 };
