@@ -249,27 +249,38 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         await ctx.editMessageText(getPaymentInstruction('VIP', VIP_PRICE), { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'show_subscriptions' }]] } });
     });
     bot.action('show_subscriptions', async (ctx) => {
-        await ctx.answerCbQuery(); delete userStates[ctx.from.id]; await sendSubscriptionMenu(ctx);
+        await ctx.answerCbQuery(); 
+        delete userStates[ctx.from.id]; 
+        await sendSubscriptionMenu(ctx);
     });
 
     // =========================
     // RECEIPTS
     // =========================
     bot.on(['photo', 'document'], async (ctx) => {
-        const tgId = ctx.from.id; const state = userStates[tgId];
+        const tgId = ctx.from.id; 
+        const state = userStates[tgId];
         if (!state?.payingFor) return ctx.reply('📎 Чек — только при оплате.');
+        
         let fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length-1].file_id : ctx.message.document?.file_id;
         if (!fileId) return;
+        
         const { rows } = await pool.query(`INSERT INTO payments (user_id, amount, receipt_file_id, status, plan_type) VALUES ($1,$2,$3,'pending',$4) RETURNING id`, [tgId, state.amount, fileId, state.payingFor]);
-        const paymentId = rows[0].id; delete userStates[tgId];
+        const paymentId = rows[0].id; 
+        delete userStates[tgId];
+        
         await ctx.reply(`✅ <b>Чек принят!</b>\n📋 #${paymentId}`, { parse_mode: 'HTML' });
+        
         const user = await getUser(tgId);
         const caption = `🚨 Заявка #${paymentId}\n👤 ${user?.first_name}\n💎 ${state.payingFor} | 💰 ${state.amount}₽`;
         const keyboard = { inline_keyboard: [[{ text: '✅ Одобрить', callback_data: `approve_${paymentId}` }], [{ text: '❌ Отклонить', callback_data: `reject_${paymentId}` }]] };
+        
         try {
             if (ctx.message.photo) await ctx.telegram.sendPhoto(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
             else await ctx.telegram.sendDocument(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
-        } catch(e) { console.error('ADMIN ERROR:', e); }
+        } catch(e) { 
+            console.error('ADMIN ERROR:', e); 
+        }
     });
 
     // =========================
@@ -281,18 +292,21 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         const tgId = ctx.from.id;
         if (tgId === ADMIN_ID) return;
 
-        const adminKey = `admin_reject_${ADMIN_ID}`;
-        if (userStates[adminKey]) {
+        const adminKey = `admin_reject_${ADMIN_ID}`;        if (userStates[adminKey]) {
             const pid = userStates[adminKey].paymentId;
             delete userStates[adminKey];
             await pool.query(`UPDATE payments SET status = 'rejected' WHERE id = $1`, [pid]);
             await ctx.reply(`❌ #${pid} отклонена`);
-            try { const { rows: [p] } = await pool.query(`SELECT user_id FROM payments WHERE id = $1`, [pid]); await ctx.telegram.sendMessage(p.user_id, `❌ Отклонено.\nПричина: ${text}`); } catch(e){}
+            try { 
+                const { rows: [p] } = await pool.query(`SELECT user_id FROM payments WHERE id = $1`, [pid]); 
+                await ctx.telegram.sendMessage(p.user_id, `❌ Отклонено.\nПричина: ${text}`); 
+            } catch(e) {}
             return;
         }
 
         await createUser(tgId, ctx.from.username, ctx.from.first_name);
-        const subscription = await hasSubscription(tgId);        const freeUsed = await getFreeRecipesUsed(tgId);
+        const subscription = await hasSubscription(tgId);
+        const freeUsed = await getFreeRecipesUsed(tgId);
         if (!subscription && freeUsed >= FREE_LIMIT) return sendSubscriptionMenu(ctx);
 
         const state = userStates[tgId];
@@ -310,7 +324,7 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
                 const prompt = buildPrompt(state.requestType, state.ingredients, text, planType);
                 let recipe = await callGigaChat(prompt.system, prompt.user);
                 recipe = cleanHtml(recipe);
-                try { await ctx.deleteMessage(loading.message_id); } catch {}
+                try { await ctx.deleteMessage(loading.message_id); } catch (e) {}
 
                 const steps = parseSteps(recipe);
                 const titleMatch = recipe.match(/<b>.*?[🍽🍰].*?<\/b>/i);
@@ -325,15 +339,14 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
                     if (getFreeRecipesUsed(tgId) >= FREE_LIMIT) await sendSubscriptionMenu(ctx);
                 }
             } catch (err) {
-                try { await ctx.deleteMessage(loading.message_id); } catch {}
+                try { await ctx.deleteMessage(loading.message_id); } catch (e) {}
                 console.error('GigaChat error:', err);
-                await ctx.reply('❌ Ошибка генерации. Попробуй позже.');
-            }
+                await ctx.reply('❌ Ошибка генерации. Попробуй позже.');            }
         }
     });
 
     // =========================
-    // 📖 STEP NAVIGATION (С ЛОГИРОВАНИЕМ)
+    // 📖 STEP NAVIGATION
     // =========================
     bot.action(/step_(.+)/, async (ctx) => {
         const action = ctx.match[1];
@@ -341,6 +354,7 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         const state = userStates[tgId];
         
         console.log(`🔘 Кнопка нажата: step_${action}, user: ${tgId}, state:`, state?.mode);
+
         if (!state || state.mode !== 'step_recipe') {
             console.log('❌ Режим step_recipe не активен');
             return ctx.answerCbQuery('⚠️ Режим не активен. Запросите рецепт заново.');
@@ -376,7 +390,6 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
                 return ctx.answerCbQuery('⚠️ Неизвестное действие');
         }
     });
-
     // =========================
     // VIP COMMANDS
     // =========================
@@ -390,6 +403,7 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         if (!sub || sub.plan_type !== 'VIP') return ctx.reply('🔒 Только VIP');
         ctx.reply('🥗 Диетолог (в разработке)', { parse_mode: 'HTML' });
     });
+
     // =========================
     // ✅ ADMIN: APPROVE
     // =========================
@@ -408,7 +422,9 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
             await ctx.answerCbQuery('✅');
             await ctx.editMessageCaption(`✅ #${paymentId}\n🔥 ${planType}`, { parse_mode: 'HTML' });
             await ctx.telegram.sendMessage(userId, `🎉 <b>${planType} активирована!</b>\n📅 До: ${expiresAt.toLocaleDateString('ru-RU')}`, { parse_mode: 'HTML' });
-        } catch(e) { await ctx.answerCbQuery('❌', { show_alert: true }); }
+        } catch(e) { 
+            await ctx.answerCbQuery('❌', { show_alert: true }); 
+        }
     });
 
     // =========================
@@ -423,8 +439,9 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
             await pool.query(`UPDATE payments SET status = 'rejected' WHERE id = $1`, [paymentId]);
             await ctx.answerCbQuery('❌');
             await ctx.editMessageCaption(`❌ #${paymentId}`, { parse_mode: 'HTML' });
-            await ctx.telegram.sendMessage(payment.user_id, `❌ Отклонено.\n📋 #${paymentId}`, { parse_mode: 'HTML' });
-        } catch(e) { await ctx.answerCbQuery('❌', { show_alert: true }); }
+            await ctx.telegram.sendMessage(payment.user_id, `❌ Отклонено.\n📋 #${paymentId}`, { parse_mode: 'HTML' });        } catch(e) { 
+            await ctx.answerCbQuery('❌', { show_alert: true }); 
+        }
     });
 
-};
+}; // <--- КОНЕЦ МОДУЛЯ
