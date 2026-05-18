@@ -497,71 +497,124 @@ ${SBP_RECIPIENT}
         await sendSubscriptionMenu(ctx);
     });
 
+// =========================
+// RECEIPTS + ADMIN NOTIFY FIX
+// =========================
+bot.on(['photo', 'document'], async (ctx) => {
+
+    const tgId = ctx.from.id;
+    const state = userStates[tgId];
+
+    if (!state?.payingFor) {
+        return ctx.reply('📎 Чек принимается только при оплате подписки.');
+    }
+
+    let fileId = null;
+
+    if (ctx.message.photo) {
+        fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    }
+
+    if (ctx.message.document) {
+        fileId = ctx.message.document.file_id;
+    }
+
+    if (!fileId) return;
+
     // =========================
-    // RECEIPTS
+    // SAVE PAYMENT
     // =========================
-    bot.on(['photo', 'document'], async (ctx) => {
+    const { rows } = await pool.query(
+        `
+        INSERT INTO payments (
+            user_id,
+            amount,
+            receipt_file_id,
+            status,
+            plan_type
+        )
+        VALUES ($1,$2,$3,'pending',$4)
+        RETURNING id
+        `,
+        [
+            tgId,
+            state.amount,
+            fileId,
+            state.payingFor
+        ]
+    );
 
-        const tgId = ctx.from.id;
+    const paymentId = rows[0].id;
 
-        const state = userStates[tgId];
+    delete userStates[tgId];
 
-        if (!state?.payingFor) {
-            return ctx.reply(
-                '📎 Чек принимается только при оплате.'
+    // =========================
+    // USER RESPONSE
+    // =========================
+    await ctx.reply(
+        `✅ <b>Чек получен!</b>\n📋 Заявка #${paymentId}\n⏳ Ожидайте подтверждения`,
+        { parse_mode: 'HTML' }
+    );
+
+    // =========================
+    // GET USER INFO
+    // =========================
+    const user = await getUser(tgId);
+
+    // =========================
+    // ADMIN MESSAGE (FIX HERE)
+    // =========================
+    const adminCaption =
+`🚨 <b>НОВАЯ ЗАЯВКА НА ПОДПИСКУ</b>
+
+📋 Заявка: #${paymentId}
+👤 Пользователь: ${user?.first_name || 'Unknown'}
+📛 @${user?.username || 'нет'}
+🆔 ID: <code>${tgId}</code>
+
+💎 Тариф: <b>${state.payingFor}</b>
+💰 Сумма: <b>${state.amount}₽</b>`;
+
+    const adminKeyboard = {
+        inline_keyboard: [
+            [
+                { text: '✅ Одобрить', callback_data: `approve_${paymentId}` }
+            ],
+            [
+                { text: '❌ Отклонить', callback_data: `reject_${paymentId}` }
+            ]
+        ]
+    };
+
+    // =========================
+    // SEND TO ADMIN
+    // =========================
+    try {
+        if (ctx.message.photo) {
+            await ctx.telegram.sendPhoto(
+                ADMIN_ID,
+                fileId,
+                {
+                    caption: adminCaption,
+                    parse_mode: 'HTML',
+                    reply_markup: adminKeyboard
+                }
+            );
+        } else {
+            await ctx.telegram.sendDocument(
+                ADMIN_ID,
+                fileId,
+                {
+                    caption: adminCaption,
+                    parse_mode: 'HTML',
+                    reply_markup: adminKeyboard
+                }
             );
         }
-
-        let fileId = null;
-
-        if (ctx.message.photo) {
-            fileId =
-                ctx.message.photo[
-                    ctx.message.photo.length - 1
-                ].file_id;
-        }
-
-        if (ctx.message.document) {
-            fileId = ctx.message.document.file_id;
-        }
-
-        if (!fileId) return;
-
-        const { rows } = await pool.query(
-            `
-            INSERT INTO payments (
-                user_id,
-                amount,
-                receipt_file_id,
-                status,
-                plan_type
-            )
-            VALUES ($1,$2,$3,'pending',$4)
-            RETURNING id
-            `,
-            [
-                tgId,
-                state.amount,
-                fileId,
-                state.payingFor
-            ]
-        );
-
-        const paymentId = rows[0].id;
-
-        delete userStates[tgId];
-
-        await ctx.reply(
-            `
-✅ <b>Чек получен</b>
-
-Заявка #${paymentId}
-`,
-            {
-                parse_mode: 'HTML'
-            }
-        );
-    });
+    } catch (e) {
+        console.error('ADMIN NOTIFY ERROR:', e);
+    }
+});
 
     // =========================
     // MAIN TEXT
