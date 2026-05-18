@@ -1,15 +1,26 @@
 {
-  "name": "home-chef-gigachat",
+  "name": "chef-ai-bot",
   "version": "2.0.0",
-  "description": "AI Chef Bot",
-  "main": "index.js", 
+  "description": "Telegram-бот Шеф-Повар AI с подписками и GigaChat",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "test": "echo \"No tests specified\" && exit 0"
   },
+  "keywords": [
+    "telegram",
+    "bot",
+    "ai",
+    "gigachat",
+    "recipes",
+    "subscription"
+  ],
+  "author": "",
+  "license": "MIT",
   "dependencies": {
     "telegraf": "^4.16.3",
-    "gigachat": "*",
+    "gigachat": "^0.1.5",
     "dotenv": "^16.3.1",
     "pg": "^8.11.3",
     "exceljs": "^4.4.0",
