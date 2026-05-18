@@ -96,7 +96,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
     // =========================
     // 📖 STEP PARSER
-    // =========================    function parseSteps(fullText) {
+    // =========================   
+    function parseSteps(fullText) {
         if (!fullText) return ['Текст рецепта не получен.'];
         const stepRegex = /(?:Шаг\s*\d+[\.:\s\-]*)|(?:^\d+\.\s)/gim;
         const parts = fullText.split(stepRegex).filter(p => p.trim().length > 5);
