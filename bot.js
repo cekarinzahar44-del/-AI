@@ -67,7 +67,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
     async function createUser(tgId, username, firstName) {
         await pool.query(
-            'INSERT INTO users (tg_id, username, first_name) VALUES ($1, $2, $3) ON CONFLICT (tg_id) DO NOTHING',
+            'INSERT INTO users (tg_id, username, first_name, free_recipes_used) VALUES ($1, $2, $3, 0) ON CONFLICT (tg_id) DO NOTHING',
             [tgId, username, firstName]
         );
     }
@@ -96,31 +96,70 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const user = await getUser(tgId);
         return user ? user.free_recipes_used : 0;
     }
+    // ===== СООБЩЕНИЕ ОБ ОКОНЧАНИИ ЛИМИТА =====
+    async function sendLimitExceededMessage(ctx) {
+        await ctx.reply(
+            `🔒 <b>Пробная версия завершена!</b>\n\n` +
+            `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
+            `📅 Подписка на месяц — <b>${SUB_PRICE}₽</b>\n` +
+            `✅ Неограниченные рецепты`,
+            { 
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
+                    Markup.button.callback(`💳 Оформить подписку — ${SUB_PRICE}₽`, 'pay_subscribe')
+                ])
+            }
+        );
+    }
+
     // ===== /start =====
     bot.start(async (ctx) => {
         if (ctx.from.id === ADMIN_ID) return;
 
         const tgId = ctx.from.id;
+        const userName = ctx.from.first_name || 'Друг';
+        
+        // Создаём или обновляем пользователя
         await createUser(tgId, ctx.from.username, ctx.from.first_name);
         
-        const sub = await getSubscription(tgId);
-        let msg = '👋 Привет! Я Домашний Шеф 🍳\n\n';
-        msg += '🎯 Я могу:\n';
-        msg += '1️⃣ Найти рецепт конкретного блюда (например: "паста карбонара")\n';
-        msg += '2️⃣ Придумать рецепт из твоих продуктов (например: "яйца помидоры бекон")\n\n';
-        msg += `🎁 ${FREE_LIMIT} бесплатных рецептов\n\n`;
+        const hasSub = await hasActiveSubscription(tgId);
+        const freeUsed = await getFreeRecipesUsed(tgId);
         
-        if (sub) {
+        // Проверяем, возвращался ли пользователь
+        if (freeUsed >= FREE_LIMIT && !hasSub) {
+            // Возвращающийся пользователь
+            await ctx.reply(
+                `👋 <b>Здравствуйте, ${userName}! Рады, что вы решили вернуться!</b>\n\n` +
+                `😔 <b>Ваши пробные рецепты закончились.</b>\n\n` +
+                `📅 <b>Подписка на месяц — ${SUB_PRICE}₽</b>\n` +
+                `✅ Неограниченные рецепты`,
+                { 
+                    parse_mode: 'HTML',
+                    reply_markup: Markup.inlineKeyboard([
+                        Markup.button.callback(`💳 Оформить подписку — ${SUB_PRICE}₽`, 'pay_subscribe')
+                    ])
+                }
+            );
+        } else if (hasSub) {
+            // Пользователь с подпиской
             const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
-            msg += `✅ PRO Подписка активна!\n`;
-            msg += `📅 До: ${new Date(sub.expires_at).toLocaleDateString('ru-RU')}\n`;
-            msg += `⏳ Осталось дней: ${daysLeft}`;
+            await ctx.reply(
+                `👨‍🍳 <b>Я ваш Домашний ШЕФ-ПОВАР!</b>\n\n` +
+                `✅ <b>PRO Подписка активна!</b>\n` +                `📅 До: ${new Date(sub.expires_at).toLocaleDateString('ru-RU')}\n` +
+                `⏳ Осталось дней: ${daysLeft}\n\n` +
+                `🎯 <b>Назовите свои ингредиенты или спросите рецепт любого блюда!</b>`,
+                { parse_mode: 'HTML' }
+            );
         } else {
-            const freeUsed = await getFreeRecipesUsed(tgId);
-            msg += `📊 Использовано: ${freeUsed} из ${FREE_LIMIT}`;
+            // Новый пользователь или с оставшимися бесплатными рецептами
+            const freeLeft = FREE_LIMIT - freeUsed;
+            await ctx.reply(
+                `👨‍🍳 <b>Я ваш Домашний ШЕФ-ПОВАР! Добро пожаловать!</b>\n\n` +
+                `🎯 <b>Назовите свои ингредиенты или спросите рецепт любого блюда!</b>\n\n` +
+                `🎁 У вас осталось <b>${freeLeft} бесплатных рецепта</b>`,
+                { parse_mode: 'HTML' }
+            );
         }
-        
-        ctx.reply(msg);
     });
 
     // ===== ОБРАБОТКА ЗАПРОСОВ =====
@@ -139,19 +178,9 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const hasSub = await hasActiveSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
         
-        // ===== ПРОВЕРКА ЛИМИТА С КНОПКОЙ ОПЛАТЫ =====
+        // ===== ПРОВЕРКА ЛИМИТА =====
         if (!hasSub && freeUsed >= FREE_LIMIT) {
-            return ctx.reply(
-                `🔒 <b>Пробная версия завершена!</b>\n\n` +
-                `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
-                `📅 Подписка на месяц — <b>${SUB_PRICE}₽</b>\n` +
-                `✅ Неограниченные рецепты`,                { 
-                    parse_mode: 'HTML',
-                    reply_markup: Markup.inlineKeyboard([
-                        Markup.button.callback('💳 Оформить подписку — 500₽', 'pay_subscribe')
-                    ])
-                }
-            );
+            return await sendLimitExceededMessage(ctx);
         }
         
         const query = detectQueryType(text);
@@ -165,8 +194,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 const response = await giga.chat({
                     model: 'GigaChat',
                     messages: [
-                        { 
-                            role: 'system', 
+                        {                             role: 'system', 
                             content: `Ты — профессиональный шеф-повар. Создаёшь ПОДРОБНЫЕ рецепты известных блюд.
 
 СТРУКТУРА:
@@ -181,7 +209,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 🥚 ингредиент — количество (пояснение)
 
 
-👨‍ ШАГИ ПРИГОТОВЛЕНИЯ:
+👨‍🍳 ШАГИ ПРИГОТОВЛЕНИЯ:
 
 1️⃣ Название шага 🔪 (3-5 минут)
 Описание этапа! 😋
@@ -194,6 +222,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 - Действие 2 
 
 (минимум 5-6 шагов с ТОЧНЫМ временем!)
+
 
 🎯 СОВЕТЫ ШЕФА:
 💡 Совет 1
@@ -214,8 +243,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 👥 ПОРЦИЙ: X персоны
 
 
-ВАЖНО:
-- НИКАКИХ ** (звёздочек)!
+ВАЖНО:- НИКАКИХ ** (звёздочек)!
 - ТОЧНОЕ время для каждого шага
 - Много эмодзи
 - Конкретные количества`
@@ -243,7 +271,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                             content: `Ты — креативный шеф-повар. Создаёшь рецепты ТОЛЬКО из указанных продуктов.
 
 ПРАВИЛА:
-1. Используй ТОЛЬКО перечисленные продукты (можно базовые: соль, перец, масло)2. Не добавляй ингредиенты, которых нет в списке
+1. Используй ТОЛЬКО перечисленные продукты (можно базовые: соль, перец, масло)
+2. Не добавляй ингредиенты, которых нет в списке
 3. Если продуктов мало — предложи простое блюдо
 
 СТРУКТУРА:
@@ -252,7 +281,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
 Описание (почему это вкусно!) 💖
 
-🛒 ТВОИ ПРОДУКТЫ:
+ ТВОИ ПРОДУКТЫ:
 
 🍜 продукт 1 — количество
 🥚 продукт 2 — количество
@@ -263,7 +292,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
 1️⃣ Название шага 🔪 (X минут)
 - Что делаем 📏
 - Детали 💡
-
 2️⃣ Название шага 🔥 (X минут)
 - Продолжаем ✨
 
@@ -292,7 +320,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                             role: 'user', 
                             content: `Придумай рецепт из этих продуктов: ${text}. Используй только их (можно соль, перец, масло)!` 
                         }
-                    ],                    max_tokens: 1800,
+                    ],
+                    max_tokens: 1800,
                     temperature: 0.9
                 });
                 
@@ -309,9 +338,13 @@ module.exports = (bot, pool, ADMIN_ID) => {
             // Считаем рецепты
             if (!hasSub) {
                 await incrementFreeRecipes(tgId);
-                const left = FREE_LIMIT - (freeUsed + 1);
-                if (left > 0) {
-                    await ctx.reply(`🎁 Осталось бесплатных рецептов: ${left}`);
+                const newFreeUsed = freeUsed + 1;
+                const left = FREE_LIMIT - newFreeUsed;
+                
+                if (left > 0) {                    await ctx.reply(`🎁 Осталось бесплатных рецептов: ${left}`);
+                } else {
+                    // Лимит исчерпан — показываем сообщение с кнопкой
+                    await sendLimitExceededMessage(ctx);
                 }
             }
             
@@ -341,7 +374,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
     });
 
     // ===== ПРИЁМ ЧЕКОВ =====
-    bot.on(['photo', 'document'], async (ctx) => {        const tgId = ctx.from.id;
+    bot.on(['photo', 'document'], async (ctx) => {
+        const tgId = ctx.from.id;
         const user = await getUser(tgId);
         
         if (!user) {
@@ -356,8 +390,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 ctx.message.document.mime_type !== 'application/pdf') {
                 return;
             }
-            fileId = ctx.message.document.file_id;
-        }
+            fileId = ctx.message.document.file_id;        }
         
         if (!fileId) return;
         
@@ -390,7 +423,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                         `🆔 <b>TG ID:</b> <code>${tgId}</code>\n` +
                         `💰 <b>Сумма:</b> ${SUB_PRICE}₽\n\n` +
                         `📎 <b>Чек:</b> <a href="${fileLink}">Открыть файл</a>\n\n` +
-                        `<i>Нажмите кнопку для подтверждения</i>`;                    
+                        `<i>Нажмите кнопку для подтверждения</i>`;
+                    
                     await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {
                         parse_mode: 'HTML',
                         reply_markup: {
@@ -405,8 +439,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                     
                     console.log(`✅ Уведомление админу (чек #${paymentId})`);
                     
-                } catch (notifyErr) {
-                    console.error('Notify error:', notifyErr.message);
+                } catch (notifyErr) {                    console.error('Notify error:', notifyErr.message);
                 }
             }
             
