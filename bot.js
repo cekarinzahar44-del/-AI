@@ -89,68 +89,63 @@ function cleanHtml(text) {
 }
 
 // =========================
-// 📖 STEP PARSER (НОВОЕ)
-// =========================
-function parseSteps(fullText) {
-    if (!fullText) return ['Текст рецепта не получен.'];
-    
-    // Ищем маркеры "Шаг 1", "Шаг 2", "1.", "2." и т.д.
-    const stepRegex = /(?:Шаг\s*\d+[\.:\s\-]*)|(?:^\d+\.\s)/gim;
-    const parts = fullText.split(stepRegex).filter(p => p.trim().length > 5);    
-    if (parts.length >= 2) return parts.map(p => p.trim());
-    
-    // Фоллбэк: разбиваем по двойным переносам
-    const fallback = fullText.split(/\n\s*\n/).filter(p => p.trim().length > 10);
-    return fallback.length >= 2 ? fallback : [fullText];
-}
-
-// =========================
-// 📖 SEND STEP MESSAGE (НОВОЕ)
-// =========================
-async function sendStepMessage(ctx, tgId) {
-    const state = userStates[tgId];
-    if (!state || state.mode !== 'step_recipe') return;
-
-    const stepText = state.steps[state.currentStep];
-    const progress = `📖 <b>${state.title}</b>\n⏳ Шаг ${state.currentStep + 1} из ${state.total}`;
-
-    const keyboard = {
-        inline_keyboard: [
-            [
-                { text: state.currentStep === 0 ? '⏮ Начало' : '⬅️ Назад', callback_data: state.currentStep === 0 ? 'step_none' : 'step_prev' },
-                { text: state.currentStep === state.total - 1 ? '🏁 Готово' : 'Далее ➡️', callback_data: state.currentStep === state.total - 1 ? 'step_none' : 'step_next' }
-            ],
-            [
-                { text: '📜 Весь рецепт', callback_data: 'step_full' },
-                { text: '🗑 Закрыть', callback_data: 'step_close' }
-            ]
-        ]
-    };
-
-    try {
-        if (ctx.update?.callback_query) {
-            await ctx.editMessageText(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
-        } else {
-            await ctx.reply(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
-        }
-    } catch (e) {
-        await ctx.reply(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
-    }
-}
-
-// =========================
-// EXPORT
+// EXPORT MODULE
 // =========================
 module.exports = (bot, pool, ADMIN_ID) => {
     console.log('✅ VIP Chef Bot loaded');
     const userStates = {};
 
-    // =========================    // REQUEST TYPE
+    // =========================
+    // 📖 STEP PARSER    // =========================
+    function parseSteps(fullText) {
+        if (!fullText) return ['Текст рецепта не получен.'];
+        const stepRegex = /(?:Шаг\s*\d+[\.:\s\-]*)|(?:^\d+\.\s)/gim;
+        const parts = fullText.split(stepRegex).filter(p => p.trim().length > 5);
+        if (parts.length >= 2) return parts.map(p => p.trim());
+        const fallback = fullText.split(/\n\s*\n/).filter(p => p.trim().length > 10);
+        return fallback.length >= 2 ? fallback : [fullText];
+    }
+
+    // =========================
+    // 📖 SEND STEP MESSAGE
+    // =========================
+    async function sendStepMessage(ctx, tgId) {
+        const state = userStates[tgId];
+        if (!state || state.mode !== 'step_recipe') return;
+
+        const stepText = state.steps[state.currentStep];
+        const progress = `📖 <b>${state.title}</b>\n⏳ Шаг ${state.currentStep + 1} из ${state.total}`;
+
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: state.currentStep === 0 ? '⏮ Начало' : '⬅️ Назад', callback_data: state.currentStep === 0 ? 'step_none' : 'step_prev' },
+                    { text: state.currentStep === state.total - 1 ? '🏁 Готово' : 'Далее ➡️', callback_data: state.currentStep === state.total - 1 ? 'step_none' : 'step_next' }
+                ],
+                [
+                    { text: '📜 Весь рецепт', callback_data: 'step_full' },
+                    { text: '🗑 Закрыть', callback_data: 'step_close' }
+                ]
+            ]
+        };
+
+        try {
+            if (ctx.update?.callback_query) {
+                await ctx.editMessageText(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
+            } else {
+                await ctx.reply(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
+            }
+        } catch (e) {
+            await ctx.reply(`${progress}\n\n${stepText}`, { parse_mode: 'HTML', reply_markup: keyboard });
+        }
+    }
+
+    // =========================
+    // REQUEST TYPE
     // =========================
     function detectRequestType(text) {
         const lower = text.toLowerCase();
-        const dishKeywords = ['рецепт', 'приготовь', 'хочу', 'сделай', 'как сделать', 'борщ', 'салат', 'суп', 'паста', 'карбонара', 'омлет', 'плов', 'котлеты', 'торт', 'десерт'];
-        if (dishKeywords.some(k => lower.includes(k))) return 'dish';
+        const dishKeywords = ['рецепт', 'приготовь', 'хочу', 'сделай', 'как сделать', 'борщ', 'салат', 'суп', 'паста', 'карбонара', 'омлет', 'плов', 'котлеты', 'торт', 'десерт'];        if (dishKeywords.some(k => lower.includes(k))) return 'dish';
         if (text.includes(',')) return 'ingredients';
         return 'dish';
     }
@@ -184,7 +179,7 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
 
 ПРАВИЛА:
 ✅ Только <b> для жирного
-✅ Каждый шаг с ⏱ и 🌡
+✅ Каждый шаг с ⏱ и 
 ✅ Эмодзи для наглядности
 ❌ НЕ используй ** (markdown)
 `;
@@ -194,12 +189,12 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         return { system, user: `Рецепт: ${ingredients}\nДоп: ${details || 'нет'}` };
     }
 
-    // =========================    // DB HELPERS
+    // =========================
+    // DB HELPERS
     // =========================
     async function createUser(tgId, username, firstName) {
         await pool.query(`INSERT INTO users (tg_id, username, first_name, free_recipes_used) VALUES ($1,$2,$3,0) ON CONFLICT (tg_id) DO NOTHING`, [tgId, username, firstName]);
-    }
-    async function getUser(tgId) { const { rows } = await pool.query(`SELECT * FROM users WHERE tg_id = $1`, [tgId]); return rows[0]; }
+    }    async function getUser(tgId) { const { rows } = await pool.query(`SELECT * FROM users WHERE tg_id = $1`, [tgId]); return rows[0]; }
     async function getFreeRecipesUsed(tgId) { const u = await getUser(tgId); return u?.free_recipes_used || 0; }
     async function incrementFreeRecipes(tgId) { await pool.query(`UPDATE users SET free_recipes_used = free_recipes_used + 1 WHERE tg_id = $1`, [tgId]); }
     async function resetFreeRecipes(tgId) { await pool.query(`UPDATE users SET free_recipes_used = 0 WHERE tg_id = $1`, [tgId]); }
@@ -243,12 +238,12 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
     });
     bot.action('pay_vip', async (ctx) => {
         await ctx.answerCbQuery();
-        userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };        await ctx.editMessageText(getPaymentInstruction('VIP', VIP_PRICE), { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'show_subscriptions' }]] } });
+        userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };
+        await ctx.editMessageText(getPaymentInstruction('VIP', VIP_PRICE), { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'show_subscriptions' }]] } });
     });
     bot.action('show_subscriptions', async (ctx) => {
         await ctx.answerCbQuery(); delete userStates[ctx.from.id]; await sendSubscriptionMenu(ctx);
     });
-
     // =========================
     // RECEIPTS
     // =========================
@@ -293,18 +288,18 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         const subscription = await hasSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
         if (!subscription && freeUsed >= FREE_LIMIT) return sendSubscriptionMenu(ctx);
+
         const state = userStates[tgId];
 
         // STEP 1: Запрос деталей
-        if (!state) {
-            userStates[tgId] = { requestType: detectRequestType(text), ingredients: text, step: 'details' };
+        if (!state) {            userStates[tgId] = { requestType: detectRequestType(text), ingredients: text, step: 'details' };
             return ctx.reply(`👨‍🍳 Укажите:\n👥 Порций?\n🥗 Предпочтения?`, { parse_mode: 'HTML', reply_markup: { keyboard: [['🥗 ПП'], ['🔥 Быстро'], ['💰 Бюджетно']], resize_keyboard: true } });
         }
 
         // STEP 2: Генерация рецепта
         if (state.step === 'details') {
             delete userStates[tgId];
-            const loading = await ctx.reply('👨‍🍳 Готовлю...');
+            const loading = await ctx.reply('👨‍ Готовлю...');
             try {
                 const planType = subscription?.plan_type || 'FREE';
                 const prompt = buildPrompt(state.requestType, state.ingredients, text, planType);
@@ -333,7 +328,7 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
     });
 
     // =========================
-    // 📖 STEP NAVIGATION (НОВОЕ)
+    // 📖 STEP NAVIGATION
     // =========================
     bot.action(/^step_(next|prev|full|close|none)$/, async (ctx) => {
         const action = ctx.match[1];
@@ -341,12 +336,12 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
         const state = userStates[tgId];
         if (!state || state.mode !== 'step_recipe') return ctx.answerCbQuery('⚠️ Режим не активен');
 
-        if (action === 'next' && state.currentStep < state.total - 1) state.currentStep++;        else if (action === 'prev' && state.currentStep > 0) state.currentStep--;
+        if (action === 'next' && state.currentStep < state.total - 1) state.currentStep++;
+        else if (action === 'prev' && state.currentStep > 0) state.currentStep--;
         else if (action === 'full') {
             const full = state.steps.join('\n\n---\n\n');
             await ctx.editMessageText(`📜 <b>${state.title}</b>\n\n${cleanHtml(full)}`, { parse_mode: 'HTML' });
-            delete userStates[tgId];
-            return ctx.answerCbQuery('📜 Показан полный рецепт');
+            delete userStates[tgId];            return ctx.answerCbQuery('📜 Показан полный рецепт');
         }
         else if (action === 'close') {
             delete userStates[tgId];
@@ -391,11 +386,11 @@ ${isVIP ? '<b>📊 КБЖУ:</b> Ккал/Б/Ж/У' : ''}
             await ctx.telegram.sendMessage(userId, `🎉 <b>${planType} активирована!</b>\n📅 До: ${expiresAt.toLocaleDateString('ru-RU')}`, { parse_mode: 'HTML' });
         } catch(e) { await ctx.answerCbQuery('❌', { show_alert: true }); }
     });
+
     // =========================
     // ❌ ADMIN: REJECT
     // =========================
-    bot.action(/^reject_(\d+)$/, async (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒', { show_alert: true });
+    bot.action(/^reject_(\d+)$/, async (ctx) => {        if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒', { show_alert: true });
         const paymentId = ctx.match[1];
         try {
             const { rows: [payment] } = await pool.query(`SELECT * FROM payments WHERE id = $1`, [paymentId]);
