@@ -1,40 +1,43 @@
 const { Markup } = require('telegraf');
 const ExcelJS = require('exceljs');
-const fs = require('fs');
+const fs = require('fs').promises;
+const path = require('path');
 
 module.exports = (bot, pool, ADMIN_ID) => {
-
     if (!ADMIN_ID) {
-        console.warn('⚠️ ADMIN_ID не задан, админка отключена');
+        console.warn('⚠️ ADMIN_ID не задан — админ-панель отключена');
         return;
     }
+    console.log(`✅ Admin module loaded (ID: ${ADMIN_ID})`);
 
-    console.log(`✅ Admin module loaded (Admin ID: ${ADMIN_ID})`);
-
-    // ===== АДМИН /start =====
+    // ===== /start для админа =====
     bot.start(async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) return;
         
         try {
             const { rows: stats } = await pool.query(`
                 SELECT 
-                    (SELECT COUNT(*) FROM users) as users,
-                    (SELECT COUNT(*) FROM subscriptions WHERE is_active = TRUE) as subs,
-                    (SELECT COUNT(*) FROM payments WHERE status = 'pending') as pending
+                    (SELECT COUNT(*) FROM users) as total_users,
+                    (SELECT COUNT(*) FROM subscriptions WHERE is_active = TRUE) as active_subs,
+                    (SELECT COUNT(*) FROM payments WHERE status = 'pending') as pending_payments,
+                    (SELECT SUM(amount) FROM payments WHERE status = 'approved') as total_revenue
             `);
             
+            const s = stats[0];
             const msg = `👨‍💼 <b>Панель администратора</b>\n\n` +
                 `📊 <b>Статистика:</b>\n` +
-                `• Всего пользователей: ${stats[0].users}\n` +
-                `• Активных подписок: ${stats[0].subs}\n` +
-                `• Ожидающих оплат: ${stats[0].pending}\n\n` +
+                `• 👥 Пользователей: ${s.total_users}\n` +
+                `• 🔥 Активных подписок: ${s.active_subs}\n` +
+                `• ⏳ Ожидающих оплат: ${s.pending_payments}\n` +
+                `• 💰 Выручка: ${s.total_revenue || 0}₽\n\n` +
                 `🔧 <b>Управление:</b>`;
             
             await ctx.reply(msg, { 
                 parse_mode: 'HTML',
                 reply_markup: Markup.keyboard([
                     ['📋 Ожидающие оплаты', '📥 Экспорт подписок'],
-                    ['📊 Статистика', 'ℹ️ Помощь']
+                    ['📊 Статистика', '🗑 Очистка'],
+                    ['ℹ️ Помощь']
                 ]).resize()
             });
         } catch (e) {
@@ -43,26 +46,31 @@ module.exports = (bot, pool, ADMIN_ID) => {
         }
     });
 
-    // ===== КНОПКИ АДМИНА =====
-    bot.hears('📋 Ожидающие оплаты', async (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) return;
+    // ===== 📋 Ожидающие оплаты =====
+    bot.hears('📋 Ожидающие оплаты', async (ctx) => {        if (ctx.from.id !== ADMIN_ID) return;
         
-        try {            const { rows } = await pool.query(`
-                SELECT p.id, u.first_name, u.username, p.amount, p.created_at
+        try {
+            const { rows } = await pool.query(`
+                SELECT p.id, u.first_name, u.username, u.tg_id, p.amount, p.plan_type, p.created_at
                 FROM payments p 
                 JOIN users u ON p.user_id = u.tg_id 
                 WHERE p.status = 'pending' 
                 ORDER BY p.created_at DESC 
-                LIMIT 10
+                LIMIT 20
             `);
             
-            if (rows.length === 0) return ctx.reply('✅ Нет ожидающих оплат');
+            if (rows.length === 0) {
+                return ctx.reply('✅ Нет ожидающих оплат 🎉');
+            }
             
             let msg = `📋 <b>Ожидающие оплаты (${rows.length}):</b>\n\n`;
-            rows.forEach(r => {
-                msg += `<b>#${r.id}</b> — ${r.first_name} (@${r.username || 'нет'})\n`;
-                msg += `💰 ${r.amount}₽ | 🕐 ${new Date(r.created_at).toLocaleString('ru-RU')}\n\n`;
+            rows.forEach((r, i) => {
+                msg += `<b>#${i+1} Заявка ${r.id}</b>\n`;
+                msg += `👤 ${r.first_name} ${r.username ? '@'+r.username : ''} (ID: ${r.tg_id})\n`;
+                msg += `💎 ${r.plan_type} | 💰 ${r.amount}₽\n`;
+                msg += `🕐 ${new Date(r.created_at).toLocaleString('ru-RU')}\n\n`;
             });
+            msg += `<i>Чеки уже отправлены вам в личные сообщения от бота.</i>`;
             
             ctx.reply(msg, { parse_mode: 'HTML' });
         } catch (e) {
@@ -70,16 +78,17 @@ module.exports = (bot, pool, ADMIN_ID) => {
         }
     });
 
+    // ===== 📥 Экспорт подписок в Excel =====
     bot.hears('📥 Экспорт подписок', async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) return;
         
-        await ctx.reply('🔄 Генерирую Excel...');
+        await ctx.reply('🔄 Генерирую Excel-файл...');
         
         try {
             const { rows } = await pool.query(`
                 SELECT 
-                    u.tg_id, u.first_name, u.username,
-                    s.starts_at, s.expires_at,
+                    u.tg_id, u.first_name, u.username, u.created_at as user_joined,
+                    s.id as sub_id, s.starts_at, s.expires_at, s.plan_type,
                     p.amount, p.created_at as payment_date
                 FROM subscriptions s 
                 JOIN users u ON s.user_id = u.tg_id
@@ -87,16 +96,20 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 WHERE s.is_active = TRUE
                 ORDER BY s.expires_at ASC
             `);
-            
-            if (rows.length === 0) return ctx.reply('📭 Нет активных подписок');
+                        if (rows.length === 0) {
+                return ctx.reply('📭 Нет активных подписок для экспорта');
+            }
             
             const workbook = new ExcelJS.Workbook();
-            const ws = workbook.addWorksheet('Подписки');
+            const ws = workbook.addWorksheet('Активные подписки');
             
             ws.columns = [
                 { header: 'TG ID', key: 'tg_id', width: 15 },
                 { header: 'Имя', key: 'name', width: 20 },
-                { header: 'Username', key: 'username', width: 20 },                { header: 'Начало', key: 'starts', width: 20 },
+                { header: 'Username', key: 'username', width: 20 },
+                { header: 'Дата регистрации', key: 'joined', width: 20 },
+                { header: 'Тариф', key: 'plan', width: 10 },
+                { header: 'Начало', key: 'starts', width: 20 },
                 { header: 'Окончание', key: 'expires', width: 20 },
                 { header: 'Сумма', key: 'amount', width: 10 },
                 { header: 'Дата оплаты', key: 'paid_at', width: 20 }
@@ -106,28 +119,37 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 tg_id: r.tg_id,
                 name: r.first_name || '-',
                 username: r.username ? '@' + r.username : '-',
+                joined: new Date(r.user_joined).toLocaleString('ru-RU'),
+                plan: r.plan_type,
                 starts: new Date(r.starts_at).toLocaleString('ru-RU'),
                 expires: new Date(r.expires_at).toLocaleString('ru-RU'),
                 amount: `${r.amount}₽`,
                 paid_at: r.payment_date ? new Date(r.payment_date).toLocaleString('ru-RU') : '-'
             }));
             
-            ws.getRow(1).font = { bold: true };
-            ws.getRow(1).fill = { 
-                type: 'pattern', 
-                pattern: 'solid', 
-                fgColor: { argb: 'FF00AA00' } 
+            // Стилизация заголовка
+            const headerRow = ws.getRow(1);
+            headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+            headerRow.alignment = { horizontal: 'center' };
+            
+            // Автофильтр
+            ws.autoFilter = {
+                from: { row: 1, column: 1 },
+                to: { row: 1, column: 9 }
             };
             
-            const fileName = `subscriptions-${Date.now()}.xlsx`;
-            await workbook.xlsx.writeFile(fileName);
+            const fileName = `subscriptions_${Date.now()}.xlsx`;
+            const filePath = path.join(__dirname, fileName);
+            
+            await workbook.xlsx.writeFile(filePath);
             
             await ctx.replyWithDocument({
-                source: fs.createReadStream(fileName),
-                filename: 'active-subscriptions.xlsx'
+                source: fs.createReadStream(filePath),                filename: `подписки_${new Date().toISOString().split('T')[0]}.xlsx`
             });
             
-            fs.unlinkSync(fileName);
+            // Удаляем временный файл
+            await fs.unlink(filePath);
             
         } catch (e) {
             console.error('Export error:', e);
@@ -135,6 +157,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
         }
     });
 
+    // ===== 📊 Полная статистика =====
     bot.hears('📊 Статистика', async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) return;
         
@@ -145,110 +168,111 @@ module.exports = (bot, pool, ADMIN_ID) => {
                     (SELECT COUNT(*) FROM subscriptions WHERE is_active = TRUE) as active_subs,
                     (SELECT COUNT(*) FROM subscriptions WHERE is_active = FALSE) as expired_subs,
                     (SELECT COUNT(*) FROM payments WHERE status = 'approved') as approved_payments,
-                    (SELECT COUNT(*) FROM payments WHERE status = 'pending') as pending_payments,                    (SELECT SUM(amount) FROM payments WHERE status = 'approved') as total_revenue
+                    (SELECT COUNT(*) FROM payments WHERE status = 'pending') as pending_payments,
+                    (SELECT COUNT(*) FROM payments WHERE status = 'rejected') as rejected_payments,
+                    (SELECT SUM(amount) FROM payments WHERE status = 'approved') as total_revenue,
+                    (SELECT COUNT(DISTINCT user_id) FROM subscriptions) as unique_subscribers
             `);
             
             const s = stats[0];
-            const msg = `📊 <b>Полная статистика:</b>\n\n` +
+            const conversion = s.total_users > 0 
+                ? Math.round((s.unique_subscribers / s.total_users) * 100) 
+                : 0;
+            
+            const msg = `📊 <b>Полная статистика проекта</b>\n\n` +
                 `👥 <b>Пользователи:</b>\n` +
                 `• Всего: ${s.total_users}\n` +
                 `• С подпиской: ${s.active_subs}\n` +
-                `• Истекло: ${s.expired_subs}\n\n` +
+                `• Истекло: ${s.expired_subs}\n` +
+                `• Уникальных подписчиков: ${s.unique_subscribers}\n\n` +
                 `💰 <b>Финансы:</b>\n` +
-                `• Подтверждено оплат: ${s.approved_payments}\n` +
+                `• Подтверждено: ${s.approved_payments} оплат\n` +
                 `• Ожидает: ${s.pending_payments}\n` +
-                `• Выручка: ${s.total_revenue || 0}₽\n\n` +
-                `📈 Конверсия: ${s.total_users > 0 ? Math.round((s.active_subs / s.total_users) * 100) : 0}%`;
+                `• Отклонено: ${s.rejected_payments}\n` +
+                `• 💵 Выручка: ${s.total_revenue || 0}₽\n\n` +
+                `📈 Конверсия в подписку: <b>${conversion}%</b>`;
             
             ctx.reply(msg, { parse_mode: 'HTML' });
         } catch (e) {
-            ctx.reply('❌ Ошибка: ' + e.message);
-        }
+            ctx.reply('❌ Ошибка: ' + e.message);        }
     });
 
-    bot.hears('ℹ️ Помощь', (ctx) => {
+    // ===== 🗑 Очистка (опционально) =====
+    bot.hears('🗑 Очистка', async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) return;
-        ctx.reply('📚 <b>Справка для админа:</b>\n\n' +
-            'Когда пользователь присылает чек,\n' +
-            'вам придёт уведомление с кнопками:\n' +
-            '✅ Подтвердить — активирует подписку\n' +
-            '❌ Отклонить — отклоняет заявку\n\n' +
-            'Также используйте кнопки меню выше.');
+        
+        await ctx.reply(
+            `⚠️ <b>Очистка данных</b>\n\n` +
+            `Выберите действие:`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.callback('🗑 Удалить истёкшие подписки', 'admin_clean_expired')],
+                    [Markup.button.callback('🗑 Удалить старые pending-платежи', 'admin_clean_old_pending')],
+                    [Markup.button.callback('🔙 Отмена', 'admin_cancel')]
+                ])
+            }
+        );
     });
 
-    // ===== ОБРАБОТКА КНОПОК =====
+    bot.action('admin_clean_expired', async (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) return;
+        await ctx.answerCbQuery();
+        
+        const { rowCount } = await pool.query(
+            `DELETE FROM subscriptions WHERE is_active = FALSE AND expires_at < NOW() - INTERVAL '30 days'`
+        );
+        await ctx.reply(`✅ Удалено ${rowCount} старых неактивных подписок`);
+    });
+
+    bot.action('admin_clean_old_pending', async (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) return;
+        await ctx.answerCbQuery();
+        
+        const { rowCount } = await pool.query(
+            `DELETE FROM payments WHERE status = 'pending' AND created_at < NOW() - INTERVAL '7 days'`
+        );
+        await ctx.reply(`✅ Удалено ${rowCount} старых ожидающих платежей`);
+    });
+
+    bot.action('admin_cancel', async (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) return;
+        await ctx.answerCbQuery('Отменено');
+        await ctx.editMessageText('❌ Очистка отменена');
+    });
+
+    // ===== ℹ️ Помощь =====
+    bot.hears('ℹ️ Помощь', (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) return;        ctx.reply(
+            `📚 <b>Справка для администратора</b>\n\n` +
+            `✅ <b>Как работает оплата:</b>\n` +
+            `1. Пользователь выбирает тариф и получает инструкцию по СБП\n` +
+            `2. После оплаты он отправляет чек боту (фото/PDF)\n` +
+            `3. Вам приходит уведомление с чеком и кнопками:\n` +
+            `   • ✅ Одобрить — активирует подписку на 30 дней\n` +
+            `   • ❌ Отклонить — запросит причину отказа\n\n` +
+            `🔧 <b>Кнопки меню:</b>\n` +
+            `• 📋 Ожидающие оплаты — список всех pending-заявок\n` +
+            `• 📥 Экспорт — выгрузка активных подписок в Excel\n` +
+            `• 📊 Статистика — полная аналитика проекта\n` +
+            `• 🗑 Очистка — удаление устаревших записей`,
+            { parse_mode: 'HTML' }
+        );
+    });
+
+    // ===== 🔘 Обработка approve/reject (заглушки) =====
+    // Основная логика — в bot.js, здесь только защита
     bot.action(/^approve_(\d+)$/, async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) {
             return ctx.answerCbQuery('🔒 Доступ запрещён', { show_alert: true });
         }
-        
-        const payId = ctx.match[1];
-        
-        try {
-            await ctx.answerCbQuery('⏳ Активация...');
-            
-            await pool.query(
-                `UPDATE payments SET status='approved', approved_by=$1, approved_at=NOW() WHERE id=$2`,
-                [ADMIN_ID, payId]
-            );
-            
-            const { rows } = await pool.query(
-                `SELECT user_id FROM payments WHERE id=$1`, 
-                [payId]            );
-            
-            if (!rows.length) {
-                return ctx.answerCbQuery('❌ Платёж не найден', { show_alert: true });
-            }
-            
-            const userId = rows[0].user_id;
-            const SUB_DAYS = parseInt(process.env.SUBSCRIPTION_DAYS) || 30;
-            const expires = new Date();
-            expires.setDate(expires.getDate() + SUB_DAYS);
-            
-            await pool.query(
-                `INSERT INTO subscriptions (user_id, expires_at, payment_receipt_id) 
-                 VALUES ($1, $2, $3)`,
-                [userId, expires, payId]
-            );
-            
-            await ctx.telegram.sendMessage(
-                userId,
-                `🎉 <b>Подписка активирована!</b>\n\n` +
-                `✅ Оплата ${process.env.SUBSCRIPTION_PRICE || 500}₽ подтверждена\n` +
-                `📅 Действует до: ${expires.toLocaleDateString('ru-RU')}\n` +
-                `🍳 Теперь у вас неограниченный доступ к рецептам!`,
-                { parse_mode: 'HTML' }
-            );
-            
-            await ctx.editMessageText(`✅ <b>Заявка #${payId} подтверждена!</b>\nПодписка выдана пользователю ${userId}`);
-            
-            await ctx.answerCbQuery('✅ Подписка выдана!', { show_alert: false });
-            console.log(`✅ Подписка выдана пользователю ${userId} (чек #${payId})`);
-            
-        } catch (e) {
-            console.error('Approve error:', e);
-            await ctx.answerCbQuery('❌ Ошибка: ' + e.message, { show_alert: true });
-        }
+        await ctx.answerCbQuery('ℹ️ Обработка в основном модуле bot.js');
     });
 
     bot.action(/^reject_(\d+)$/, async (ctx) => {
         if (ctx.from.id !== ADMIN_ID) {
             return ctx.answerCbQuery('🔒 Доступ запрещён', { show_alert: true });
         }
-        
-        const payId = ctx.match[1];
-        
-        try {
-            await pool.query(`UPDATE payments SET status='rejected' WHERE id=$1`, [payId]);
-            
-            await ctx.editMessageText(`❌ <b>Заявка #${payId} отклонена</b>`);
-            
-            await ctx.answerCbQuery('❌ Отклонено');            console.log(`❌ Заявка #${payId} отклонена`);
-            
-        } catch (e) {
-            console.error('Reject error:', e);
-            await ctx.answerCbQuery('❌ Ошибка', { show_alert: true });
-        }
+        await ctx.answerCbQuery('ℹ️ Обработка в основном модуле bot.js');
     });
-
 };
