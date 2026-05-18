@@ -47,8 +47,7 @@ async function callGigaChat(systemPrompt, userPrompt, maxTokens = 3000, temperat
         headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
-            'Accept': 'application/json'        },
-        body: JSON.stringify({
+            'Accept': 'application/json'        },        body: JSON.stringify({
             model: 'GigaChat',
             messages: [
                 { role: 'system', content: systemPrompt },
@@ -97,8 +96,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const ingredientPatterns = [
             /\b(куриц|говядин|свинин|рыб|лук|морков|картофел|помидор|огурц|чеснок|сметан|молок|сыр|яиц|масл|мука|сахар|соль|перец|специ|зелень|капуст|свёкл|фасол|рис|гречк|макарон|лаваш|творог|сливк|йогурт|мед|лимон|апельсин|яблок|груш|банан|клубник|малин|смородин|орех|изюм|шоколад|какао|ванил|кориц|имбирь|базилик|петруш|укроп|кинз|мят|розмарин|тимьян|паприк|куркум|карри|соев|уксус|вин|коньяк|водк|пиво)\b/ig
         ];        
-        const hasCommas = text.includes(',');
-        const hasIngredients = ingredientPatterns.some(p => p.test(lower));
+        const hasCommas = text.includes(',');        const hasIngredients = ingredientPatterns.some(p => p.test(lower));
         
         if ((hasCommas || hasIngredients) && !dishKeywords.some(kw => lower.includes(kw))) {
             return 'ingredients';
@@ -147,7 +145,6 @@ ${isVIP ? `✨ VIP-ДОПОЛНЕНИЯ:
 • 🥗 Калорийность блюда (КБЖУ на порцию)
 • ${isPP ? '• Только ПП-ингредиенты, без сахара/муки/жиров' : ''}• 📊 Рекомендации диетолога (если запрошено)
 ` : ''}
-
 Используй эмодзи для визуального разделения.
 Не используй ** для жирного — только <b>тег</b>.
 Не добавляй лишних вступлений — сразу по структуре.`;
@@ -197,7 +194,6 @@ ${details ? `Условия: ${details}` : ''}
     async function getUser(tgId) {        const { rows } = await pool.query(`SELECT * FROM users WHERE tg_id = $1`, [tgId]);
         return rows[0];
     }
-
     async function getFreeRecipesUsed(tgId) {
         const user = await getUser(tgId);
         return user?.free_recipes_used || 0;
@@ -232,29 +228,29 @@ ${details ? `Условия: ${details}` : ''}
 // UI: Меню подписок
 // =========================
 async function sendSubscriptionMenu(ctx) {
-    const keyboard = Markup.inlineKeyboard([
-        Markup.button.callback('💰 Оплатить PRO версию', 'pay_pro'),
-        Markup.button.callback('💎 Оплатить VIP версию', 'pay_vip')
-    ]);
-
-    const message = `🎯 <b>Вы использовали все 3 пробных рецепта!</b>
+    return ctx.reply(
+        `🎯 <b>Вы использовали все 3 пробных рецепта!</b>
 
 Чтобы продолжить пользоваться <b>Шеф-Поваром AI</b>, выберите подписку:
 
 💳 <b>PRO — ${PRO_PRICE}₽ / месяц</b>
-• Неограниченное количество запросов
+• Неограниченное количество запросов к боту
 • Все базовые рецепты
-
 💎 <b>VIP — ${VIP_PRICE}₽ / месяц</b>
 • Всё из PRO +
-• 📅 Меню от ИИ
-• 🥗 ИИ-Диетолог  
-• 🔢 КБЖУ и калории`;
-
-    return ctx.reply(message, {
-        parse_mode: 'HTML',
-        reply_markup: keyboard
-    });
+• 📅 Меню от ИИ: день / неделя / 2 недели / месяц
+• 🥗 ИИ-Диетолог: похудение / набор массы / поддержание веса
+• 🥗 Только ПП-блюда (по запросу)• 🔢 Счётчик калорий и КБЖУ для каждого блюда`,
+        {
+            parse_mode: 'HTML',
+            // 🔥 ИСПРАВЛЕНО: прямой формат кнопок            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '💰 Оплатить PRO версию', callback_data: 'pay_pro' }],
+                    [{ text: '💎 Оплатить VIP версию', callback_data: 'pay_vip' }]
+                ]
+            }
+        }
+    );
 }
     
            
@@ -296,8 +292,7 @@ async function sendSubscriptionMenu(ctx) {
 • Список ингредиентов — получу рецепт только из них
 • Или название блюда — дам классический рецепт
 
-${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — меню на период, /diet — ИИ-диетолог' : ''}`,
-                { parse_mode: 'HTML' }            );
+${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — меню на период, /diet — ИИ-диетолог' : ''}`,                { parse_mode: 'HTML' }            );
         }
 
         if (freeUsed >= FREE_LIMIT) {
@@ -325,21 +320,15 @@ bot.action('pay_pro', async (ctx) => {
     userStates[ctx.from.id] = { payingFor: 'PRO', amount: PRO_PRICE };
     
     await ctx.editMessageText(
-        `💳 <b>PRO подписка — ${PRO_PRICE}₽/мес</b>
-
-1️⃣ Переведите ${PRO_PRICE}₽ по СБП:
-📱 <code>${SBP_PHONE}</code>
-👤 ${SBP_RECIPIENT}
-🏦 Сбер, ВТБ, Т-банк
-
-2️⃣ Пришлите чек сюда (фото/PDF)
-
-⏱ Активация: ~5 минут`,
+        getPaymentInstruction('PRO', PRO_PRICE),
         {
             parse_mode: 'HTML',
-            reply_markup: Markup.inlineKeyboard([
-                Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')
-            ])
+            // 🔥 ИСПРАВЛЕНО: прямой формат кнопок
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🔙 Назад к тарифам', callback_data: 'show_subscriptions' }]
+                ]
+            }
         }
     );
 });
@@ -349,21 +338,14 @@ bot.action('pay_vip', async (ctx) => {
     userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };
     
     await ctx.editMessageText(
-        `💎 <b>VIP подписка — ${VIP_PRICE}₽/мес</b>
-
-1️⃣ Переведите ${VIP_PRICE}₽ по СБП:
-📱 <code>${SBP_PHONE}</code>
-👤 ${SBP_RECIPIENT}
-🏦 Сбер, ВТБ, Т-банк
-
-2️⃣ Пришлите чек сюда (фото/PDF)
-
-⏱ Активация: ~5 минут`,
+        getPaymentInstruction('VIP', VIP_PRICE),
         {
             parse_mode: 'HTML',
-            reply_markup: Markup.inlineKeyboard([
-                Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')
-            ])
+            // 🔥 ИСПРАВЛЕНО: прямой формат кнопок            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🔙 Назад к тарифам', callback_data: 'show_subscriptions' }]
+                ]
+            }
         }
     );
 });
@@ -408,7 +390,6 @@ bot.action('show_subscriptions', async (ctx) => {
 
         await ctx.reply(
             `✅ <b>Чек получен!</b>
-
 📋 Заявка #${paymentId} отправлена на проверку.
 ⏱ Обычно это занимает до 5 минут.`,
             { parse_mode: 'HTML' }
@@ -422,12 +403,13 @@ bot.action('show_subscriptions', async (ctx) => {
 💰 Сумма: ${amount}₽
 📋 Заявка: #${paymentId}`;
 
-        const keyboard = Markup.inlineKeyboard([
-            [
-                Markup.button.callback('✅ Одобрить', `approve_${paymentId}`),
-                Markup.button.callback('❌ Отклонить', `reject_${paymentId}`)
+        // 🔥 ИСПРАВЛЕНО: прямой формат кнопок для админа
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '✅ Одобрить', callback_data: `approve_${paymentId}` }],
+                [{ text: '❌ Отклонить', callback_data: `reject_${paymentId}` }]
             ]
-        ]);
+        };
 
         if (ctx.message.photo) {
             await ctx.telegram.sendPhoto(ADMIN_ID, fileId, { caption, parse_mode: 'HTML', reply_markup: keyboard });
@@ -457,8 +439,7 @@ bot.action('show_subscriptions', async (ctx) => {
             await pool.query(`UPDATE subscriptions SET is_active = FALSE WHERE user_id = $1`, [payment.user_id]);
 
             await pool.query(
-                `INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type)
-                 VALUES ($1, TRUE, $2, $3)`,
+                `INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type)                 VALUES ($1, TRUE, $2, $3)`,
                 [payment.user_id, expiresAt, payment.plan_type]
             );
 
@@ -507,8 +488,7 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
     bot.on('text', async (ctx) => {
         const adminKey = `admin_reject_${ADMIN_ID}`;
         if (ctx.from.id === ADMIN_ID && userStates[adminKey]) {
-            const { paymentId } = userStates[adminKey];
-            const reason = ctx.message.text.trim();
+            const { paymentId } = userStates[adminKey];            const reason = ctx.message.text.trim();
             delete userStates[adminKey];
 
             try {
@@ -557,8 +537,7 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
 
         const requestType = detectRequestType(text);
         
-        if (!userStates[tgId]) {
-            userStates[tgId] = {
+        if (!userStates[tgId]) {            userStates[tgId] = {
                 requestType,
                 ingredients: text,
                 step: 'details'
@@ -607,8 +586,7 @@ ${payment.plan_type === 'VIP' ? '\n✨ Доступны: /weekmenu — меню 
                 console.error('GigaChat error:', err);
                 await ctx.reply('❌ Ошибка генерации рецепта. Попробуйте позже.');
             }
-        }
-    }
+        }    }
 
     // =========================
     // VIP COMMANDS    // =========================
