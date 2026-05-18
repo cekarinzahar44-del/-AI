@@ -96,8 +96,63 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const user = await getUser(tgId);
         return user ? user.free_recipes_used : 0;
     }
-    // ===== СООБЩЕНИЕ ОБ ОКОНЧАНИИ ЛИМИТА =====
-    async function sendLimitExceededMessage(ctx) {
+    // ===== /start =====
+    bot.start(async (ctx) => {
+        if (ctx.from.id === ADMIN_ID) return;
+
+        const tgId = ctx.from.id;
+        const userName = ctx.from.first_name || 'Друг';
+        
+        await createUser(tgId, ctx.from.username, ctx.from.first_name);
+        
+        const hasSub = await hasActiveSubscription(tgId);
+        const freeUsed = await getFreeRecipesUsed(tgId);
+        
+        if (hasSub) {
+            const sub = await getSubscription(tgId);
+            const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
+            await ctx.reply(
+                `👨‍🍳 <b>Я ваш Домашний ШЕФ-ПОВАР!</b>\n\n` +
+                `✅ <b>PRO Подписка активна!</b>\n` +
+                `📅 До: ${new Date(sub.expires_at).toLocaleDateString('ru-RU')}\n` +
+                `⏳ Осталось дней: ${daysLeft}\n\n` +
+                `🎯 <b>Назовите свои ингредиенты или спросите рецепт любого блюда!</b>`,
+                { parse_mode: 'HTML' }
+            );
+        } else if (freeUsed >= FREE_LIMIT) {
+            // Возвращающийся пользователь без подписки
+            await ctx.reply(
+                ` <b>Пробная версия завершена!</b>\n\n` +
+                `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
+                `📅 Подписка на месяц — <b>${SUB_PRICE}₽</b>\n` +
+                `✅ Неограниченные рецепты`,
+                { 
+                    parse_mode: 'HTML',
+                    reply_markup: Markup.inlineKeyboard([
+                        Markup.button.callback(`💳 Оформить подписку — ${SUB_PRICE}₽`, 'pay_subscribe')
+                    ])
+                }
+            );
+        } else {
+            // Новый пользователь
+            const freeLeft = FREE_LIMIT - freeUsed;
+            await ctx.reply(
+                `👨‍🍳 <b>Я ваш Домашний ШЕФ-ПОВАР! Добро пожаловать!</b>\n\n` +
+                `🎯 <b>Назовите свои ингредиенты или спросите рецепт любого блюда!</b>\n\n` +
+                `🎁 У вас осталось <b>${freeLeft} бесплатных рецепта</b>`,
+                { parse_mode: 'HTML' }
+            );
+        }
+    });
+
+    // ===== ОБРАБОТКА СЛОВ "ОПЛАТА", "ПОДПИСКА" =====    bot.hears(/^(оплата|подписка|pro|premium|купить)$/i, async (ctx) => {
+        const tgId = ctx.from.id;
+        const hasSub = await hasActiveSubscription(tgId);
+        
+        if (hasSub) {
+            return ctx.reply('✅ У вас уже есть активная подписка!');
+        }
+        
         await ctx.reply(
             `🔒 <b>Пробная версия завершена!</b>\n\n` +
             `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
@@ -110,56 +165,22 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 ])
             }
         );
-    }
+    });
 
-    // ===== /start =====
-    bot.start(async (ctx) => {
-        if (ctx.from.id === ADMIN_ID) return;
+    // ===== КНОПКА ОПЛАТЫ =====
+    bot.action('pay_subscribe', async (ctx) => {
+        await ctx.answerCbQuery();
+        
+        const paymentMsg = 
+            `💳 <b>Оплата подписки — ${SUB_PRICE}₽ / месяц</b>\n\n` +
+            `1️⃣ Переведите <b>${SUB_PRICE}₽</b> по СБП:\n` +
+            `📱 Номер: <code>${SBP_PHONE}</code>\n` +
+            `👤 Получатель: ${SBP_RECIPIENT}\n` +
+            `🏦 Банки: 🟢 Сбер, 🔵 ВТБ, 🟡 Т-банк\n\n` +
+            `2️⃣ После оплаты пришлите сюда <b>чек</b> (скриншот или PDF).\n\n` +
+            `⏱ Подписка активируется в течение 5 минут после проверки.`;
 
-        const tgId = ctx.from.id;
-        const userName = ctx.from.first_name || 'Друг';
-        
-        // Создаём или обновляем пользователя
-        await createUser(tgId, ctx.from.username, ctx.from.first_name);
-        
-        const hasSub = await hasActiveSubscription(tgId);
-        const freeUsed = await getFreeRecipesUsed(tgId);
-        
-        // Проверяем, возвращался ли пользователь
-        if (freeUsed >= FREE_LIMIT && !hasSub) {
-            // Возвращающийся пользователь
-            await ctx.reply(
-                `👋 <b>Здравствуйте, ${userName}! Рады, что вы решили вернуться!</b>\n\n` +
-                `😔 <b>Ваши пробные рецепты закончились.</b>\n\n` +
-                `📅 <b>Подписка на месяц — ${SUB_PRICE}₽</b>\n` +
-                `✅ Неограниченные рецепты`,
-                { 
-                    parse_mode: 'HTML',
-                    reply_markup: Markup.inlineKeyboard([
-                        Markup.button.callback(`💳 Оформить подписку — ${SUB_PRICE}₽`, 'pay_subscribe')
-                    ])
-                }
-            );
-        } else if (hasSub) {
-            // Пользователь с подпиской
-            const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
-            await ctx.reply(
-                `👨‍🍳 <b>Я ваш Домашний ШЕФ-ПОВАР!</b>\n\n` +
-                `✅ <b>PRO Подписка активна!</b>\n` +                `📅 До: ${new Date(sub.expires_at).toLocaleDateString('ru-RU')}\n` +
-                `⏳ Осталось дней: ${daysLeft}\n\n` +
-                `🎯 <b>Назовите свои ингредиенты или спросите рецепт любого блюда!</b>`,
-                { parse_mode: 'HTML' }
-            );
-        } else {
-            // Новый пользователь или с оставшимися бесплатными рецептами
-            const freeLeft = FREE_LIMIT - freeUsed;
-            await ctx.reply(
-                `👨‍🍳 <b>Я ваш Домашний ШЕФ-ПОВАР! Добро пожаловать!</b>\n\n` +
-                `🎯 <b>Назовите свои ингредиенты или спросите рецепт любого блюда!</b>\n\n` +
-                `🎁 У вас осталось <b>${freeLeft} бесплатных рецепта</b>`,
-                { parse_mode: 'HTML' }
-            );
-        }
+        ctx.reply(paymentMsg, { parse_mode: 'HTML' });
     });
 
     // ===== ОБРАБОТКА ЗАПРОСОВ =====
@@ -173,14 +194,24 @@ module.exports = (bot, pool, ADMIN_ID) => {
             return ctx.reply('🔒 Режим администратора\nИспользуйте кнопки меню.');
         }
         
-        await createUser(tgId, ctx.from.username, ctx.from.first_name);
-        
+        await createUser(tgId, ctx.from.username, ctx.from.first_name);        
         const hasSub = await hasActiveSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
         
         // ===== ПРОВЕРКА ЛИМИТА =====
         if (!hasSub && freeUsed >= FREE_LIMIT) {
-            return await sendLimitExceededMessage(ctx);
+            return await ctx.reply(
+                `🔒 <b>Пробная версия завершена!</b>\n\n` +
+                `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
+                `📅 Подписка на месяц — <b>${SUB_PRICE}₽</b>\n` +
+                `✅ Неограниченные рецепты`,
+                { 
+                    parse_mode: 'HTML',
+                    reply_markup: Markup.inlineKeyboard([
+                        Markup.button.callback(`💳 Оформить подписку — ${SUB_PRICE}₽`, 'pay_subscribe')
+                    ])
+                }
+            );
         }
         
         const query = detectQueryType(text);
@@ -194,7 +225,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 const response = await giga.chat({
                     model: 'GigaChat',
                     messages: [
-                        {                             role: 'system', 
+                        { 
+                            role: 'system', 
                             content: `Ты — профессиональный шеф-повар. Создаёшь ПОДРОБНЫЕ рецепты известных блюд.
 
 СТРУКТУРА:
@@ -209,10 +241,9 @@ module.exports = (bot, pool, ADMIN_ID) => {
 🥚 ингредиент — количество (пояснение)
 
 
-👨‍🍳 ШАГИ ПРИГОТОВЛЕНИЯ:
+👨‍ ШАГИ ПРИГОТОВЛЕНИЯ:
 
-1️⃣ Название шага 🔪 (3-5 минут)
-Описание этапа! 😋
+1️⃣ Название шага 🔪 (3-5 минут)Описание этапа! 😋
 - Подробное действие 📏
 - Важные нюансы 💡
 
@@ -243,7 +274,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
 👥 ПОРЦИЙ: X персоны
 
 
-ВАЖНО:- НИКАКИХ ** (звёздочек)!
+ВАЖНО:
+- НИКАКИХ ** (звёздочек)!
 - ТОЧНОЕ время для каждого шага
 - Много эмодзи
 - Конкретные количества`
@@ -260,8 +292,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 recipe = response.choices[0].message.content;
                 
             } else {
-                dishName = 'Блюдо из твоих продуктов';
-                loadingMsg = await ctx.reply(`🛒 Создаю рецепт из: ${text}...\n✨ Магия начинается!`);
+                dishName = 'Блюдо из твоих продуктов';                loadingMsg = await ctx.reply(`🛒 Создаю рецепт из: ${text}...\n✨ Магия начинается!`);
                 
                 const response = await giga.chat({
                     model: 'GigaChat',
@@ -287,11 +318,12 @@ module.exports = (bot, pool, ADMIN_ID) => {
 🥚 продукт 2 — количество
 
 
-👨‍🍳 ПРИГОТОВЛЕНИЕ:
+👨‍ ПРИГОТОВЛЕНИЕ:
 
 1️⃣ Название шага 🔪 (X минут)
 - Что делаем 📏
 - Детали 💡
+
 2️⃣ Название шага 🔥 (X минут)
 - Продолжаем ✨
 
@@ -309,7 +341,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
 ⏱ ВРЕМЯ: X минут
 📊 СЛОЖНОСТЬ: ⭐⭐☆☆☆
 👥 ПОРЦИЙ: X
-
 
 ВАЖНО:
 - ТОЛЬКО указанные продукты!
@@ -332,45 +363,38 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 await ctx.deleteMessage(loadingMsg.message_id);
             } catch (e) {}
             
-            // Отправляем рецепт
             await ctx.reply(recipe);
             
-            // Считаем рецепты
             if (!hasSub) {
                 await incrementFreeRecipes(tgId);
                 const newFreeUsed = freeUsed + 1;
                 const left = FREE_LIMIT - newFreeUsed;
                 
-                if (left > 0) {                    await ctx.reply(`🎁 Осталось бесплатных рецептов: ${left}`);
+                if (left > 0) {
+                    await ctx.reply(`🎁 Осталось бесплатных рецептов: ${left}`);
                 } else {
                     // Лимит исчерпан — показываем сообщение с кнопкой
-                    await sendLimitExceededMessage(ctx);
+                    await ctx.reply(
+                        `🔒 <b>Пробная версия завершена!</b>\n\n` +
+                        `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
+                        `📅 Подписка на месяц — <b>${SUB_PRICE}₽</b>\n` +
+                        `✅ Неограниченные рецепты`,
+                        { 
+                            parse_mode: 'HTML',
+                            reply_markup: Markup.inlineKeyboard([
+                                Markup.button.callback(`💳 Оформить подписку — ${SUB_PRICE}₽`, 'pay_subscribe')
+                            ])
+                        }
+                    );
                 }
             }
             
         } catch (e) {
-            console.error('Error:', e);
-            try {
+            console.error('Error:', e);            try {
                 await ctx.deleteMessage(loadingMsg.message_id);
             } catch (err) {}
             ctx.reply('❌ Ошибка генерации рецепта\nПопробуйте позже.');
         }
-    });
-
-    // ===== КНОПКА ОПЛАТЫ =====
-    bot.action('pay_subscribe', async (ctx) => {
-        await ctx.answerCbQuery();
-        
-        const paymentMsg = 
-            `💳 <b>Оплата подписки — ${SUB_PRICE}₽ / месяц</b>\n\n` +
-            `1️⃣ Переведите <b>${SUB_PRICE}₽</b> по СБП:\n` +
-            `📱 Номер: <code>${SBP_PHONE}</code>\n` +
-            `👤 Получатель: ${SBP_RECIPIENT}\n` +
-            `🏦 Банки: 🟢 Сбер,  ВТБ, 🟡 Т-банк\n\n` +
-            `2️⃣ После оплаты пришлите сюда <b>чек</b> (скриншот или PDF).\n\n` +
-            `⏱ Подписка активируется в течение 5 минут после проверки.`;
-
-        ctx.reply(paymentMsg, { parse_mode: 'HTML' });
     });
 
     // ===== ПРИЁМ ЧЕКОВ =====
@@ -390,7 +414,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 ctx.message.document.mime_type !== 'application/pdf') {
                 return;
             }
-            fileId = ctx.message.document.file_id;        }
+            fileId = ctx.message.document.file_id;
+        }
         
         if (!fileId) return;
         
@@ -410,13 +435,11 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 { parse_mode: 'HTML' }
             );
             
-            // Уведомление админу
             if (ADMIN_ID) {
                 try {
                     const currentUser = await getUser(tgId);
                     const fileLink = await ctx.telegram.getFileLink(fileId);
-                    
-                    const adminMsg = 
+                                        const adminMsg = 
                         `🔔 <b>Новая оплата!</b>\n\n` +
                         `📋 <b>Заявка #${paymentId}</b>\n\n` +
                         `👤 <b>Пользователь:</b> ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
@@ -439,7 +462,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                     
                     console.log(`✅ Уведомление админу (чек #${paymentId})`);
                     
-                } catch (notifyErr) {                    console.error('Notify error:', notifyErr.message);
+                } catch (notifyErr) {
+                    console.error('Notify error:', notifyErr.message);
                 }
             }
             
