@@ -1,10 +1,11 @@
 const { Markup } = require('telegraf');
 const { GigaChat } = require('gigachat');
-const axios = require('axios');
 
 const GIGA_CREDENTIALS = process.env.GIGACHAT_CREDENTIALS;
 const SUB_PRICE = parseInt(process.env.SUBSCRIPTION_PRICE) || 500;
 const FREE_LIMIT = 3;
+const SBP_PHONE = process.env.SBP_PHONE || '+79022231321';
+const SBP_RECIPIENT = process.env.SBP_RECIPIENT || 'Ермачкова Алина В.';
 
 const giga = new GigaChat({ credentials: GIGA_CREDENTIALS, scope: 'GIGACHAT_API_PERS' });
 
@@ -46,8 +47,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
         }
         
         if (lowerText.includes('рецепт') || 
-            lowerText.includes('приготовить') || 
-            lowerText.includes('как сделать') ||            lowerText.includes('как приготовить')) {
+            lowerText.includes('приготовить') ||             lowerText.includes('как сделать') ||
+            lowerText.includes('как приготовить')) {
             
             const match = lowerText.match(/(?:рецепт|приготовить|сделать)\s+(.+)/i);
             if (match && match[1]) {
@@ -58,191 +59,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
         return { type: 'ingredients', ingredients: text };
     }
 
-    // ===== ОЧИСТКА НАЗВАНИЯ =====
-    function cleanDishName(name) {
-        return name
-            .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
-            .replace(/[\u{2600}-\u{26FF}]/gu, '')
-            .replace(/[\u{2700}-\u{27BF}]/gu, '')
-            .replace(/[\*\_\`\[\]]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-    }
-
-    // ===== МНОГОУРОВНЕВЫЙ ПОИСК ФОТО =====
-    async function findFoodPhoto(dishName, ingredients) {
-        const cleanName = cleanDishName(dishName);
-        console.log(`🔍 Ищем фото для: "${cleanName}"`);
-        
-        let photoUrl = null;
-        
-        // 1️⃣ Pexels API
-        if (!photoUrl) {
-            photoUrl = await searchPexels(cleanName);
-        }
-        
-        // 2️⃣ Unsplash
-        if (!photoUrl) {
-            photoUrl = await searchUnsplash(cleanName);
-        }
-        
-        // 3️⃣ Pinterest (если есть токен)
-        if (!photoUrl && process.env.PINTEREST_ACCESS_TOKEN) {
-            photoUrl = await searchPinterest(cleanName);
-        }
-        
-        // 4️⃣ Fallback база
-        if (!photoUrl) {
-            photoUrl = getFallbackPhoto(cleanName);
-        }
-        
-        return photoUrl;    }
-
-    // ===== 1. PEXELS =====
-    async function searchPexels(query) {
-        try {
-            const PEXELS_KEY = process.env.PEXELS_API_KEY;
-            if (!PEXELS_KEY) return null;
-            
-            const searchTerms = [
-                query + ' food dish',
-                query + ' recipe',
-                query + ' cooking',
-                'delicious ' + query
-            ];
-            
-            for (const term of searchTerms) {
-                const res = await axios.get(
-                    `https://api.pexels.com/v1/search?query=${encodeURIComponent(term)}&per_page=3`,
-                    { 
-                        headers: { 'Authorization': PEXELS_KEY },
-                        timeout: 3000
-                    }
-                );
-                
-                if (res.data.photos && res.data.photos.length > 0) {
-                    const randomPhoto = res.data.photos[Math.floor(Math.random() * res.data.photos.length)];
-                    console.log(`✅ Pexels нашёл: ${randomPhoto.src.large}`);
-                    return randomPhoto.src.large;
-                }
-            }
-            
-            return null;
-        } catch (err) {
-            console.log('❌ Pexels не нашёл');
-            return null;
-        }
-    }
-
-    // ===== 2. UNSPLASH =====
-    async function searchUnsplash(query) {
-        try {
-            const searchTerms = [
-                query + '+food',
-                query + '+dish',
-                query + '+recipe'
-            ];
-            
-            for (const term of searchTerms) {
-                const imageUrl = `https://source.unsplash.com/600x400/?${term}`;
-                const res = await axios.head(imageUrl, { timeout: 3000 });                if (res.status === 200) {
-                    console.log(`✅ Unsplash нашёл: ${imageUrl}`);
-                    return imageUrl;
-                }
-            }
-            
-            return null;
-        } catch (err) {
-            console.log('❌ Unsplash не нашёл');
-            return null;
-        }
-    }
-
-    // ===== 3. PINTEREST =====
-    async function searchPinterest(query) {
-        try {
-            const PINTEREST_TOKEN = process.env.PINTEREST_ACCESS_TOKEN;
-            if (!PINTEREST_TOKEN) return null;
-            
-            const res = await axios.get(
-                `https://api.pinterest.com/v5/pins?query=${encodeURIComponent(query + ' food')}&per_page=3`,
-                { 
-                    headers: { 'Authorization': `Bearer ${PINTEREST_TOKEN}` },
-                    timeout: 5000
-                }
-            );
-            
-            if (res.data.items && res.data.items.length > 0) {
-                const imageUrl = res.data.items[0].media?.images?.['600x']?.url;
-                if (imageUrl) {
-                    console.log(`✅ Pinterest нашёл: ${imageUrl}`);
-                    return imageUrl;
-                }
-            }
-            
-            return null;
-        } catch (err) {
-            console.log('❌ Pinterest не нашёл');
-            return null;
-        }
-    }
-
-    // ===== 4. FALLBACK БАЗА =====
-    function getFallbackPhoto(dishName) {
-        const cleanName = cleanDishName(dishName).toLowerCase();
-        
-        const fallbackImages = {
-            'паста': 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'спагетти': 'https://images.pexels.com/photos/2069355/pexels-photo-2069355.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'карбонара': 'https://images.pexels.com/photos/1633571/pexels-photo-1633571.jpeg?auto=compress&cs=tinysrgb&w=600',            'болоньезе': 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'лазанья': 'https://images.pexels.com/photos/2456514/pexels-photo-2456514.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'пицца': 'https://images.pexels.com/photos/846175/pexels-photo-846175.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'борщ': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'пельмени': 'https://images.pexels.com/photos/3577503/pexels-photo-3577503.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'блины': 'https://images.pexels.com/photos/2211435/pexels-photo-2211435.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'куриц': 'https://images.pexels.com/photos/2871757/pexels-photo-2871757.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'мяс': 'https://images.pexels.com/photos/1600412/pexels-photo-1600412.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'говядин': 'https://images.pexels.com/photos/1600412/pexels-photo-1600412.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'рыб': 'https://images.pexels.com/photos/1267320/pexels-photo-1267320.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'салат': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'овощ': 'https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'суп': 'https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'яиц': 'https://images.pexels.com/photos/162710/pexels-photo-162710.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'омлет': 'https://images.pexels.com/photos/162710/pexels-photo-162710.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'рис': 'https://images.pexels.com/photos/1134215/pexels-photo-1134215.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'гречк': 'https://images.pexels.com/photos/1134215/pexels-photo-1134215.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'картофел': 'https://images.pexels.com/photos/5409015/pexels-photo-5409015.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'торт': 'https://images.pexels.com/photos/1920173/pexels-photo-1920173.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'десерт': 'https://images.pexels.com/photos/1558616/pexels-photo-1558616.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'бургер': 'https://images.pexels.com/photos/1633571/pexels-photo-1633571.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'суши': 'https://images.pexels.com/photos/3577503/pexels-photo-3577503.jpeg?auto=compress&cs=tinysrgb&w=600',
-            'default': 'https://images.pexels.com/photos/33242/cooking-food-ingredient-kitchen.jpg?auto=compress&cs=tinysrgb&w=600'
-        };
-        
-        for (const [key, url] of Object.entries(fallbackImages)) {
-            if (cleanName.includes(key)) {
-                console.log(`📎 Fallback для: ${key}`);
-                return url;
-            }
-        }
-        
-        console.log('📎 Используем дефолтное фото');
-        return fallbackImages['default'];
-    }
-
-    // ===== ОТПРАВКА ФОТО =====
-    async function sendPhotoWithRetry(ctx, photoUrl, caption, maxRetries = 2) {
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                await ctx.replyWithPhoto(photoUrl, { caption, parse_mode: 'HTML' });
-                return true;
-            } catch (err) {
-                if (i === maxRetries - 1) return false;
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-        }
-        return false;
-    }
     // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
     async function getUser(tgId) {
         const { rows } = await pool.query('SELECT * FROM users WHERE tg_id = $1', [tgId]);
@@ -280,7 +96,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const user = await getUser(tgId);
         return user ? user.free_recipes_used : 0;
     }
-
     // ===== /start =====
     bot.start(async (ctx) => {
         if (ctx.from.id === ADMIN_ID) return;
@@ -292,8 +107,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
         let msg = '👋 Привет! Я Домашний Шеф 🍳\n\n';
         msg += '🎯 Я могу:\n';
         msg += '1️⃣ Найти рецепт конкретного блюда (например: "паста карбонара")\n';
-        msg += '2️⃣ Придумать рецепт из твоих продуктов (например: "яйца помидоры бекон")\n\n';        msg += `🎁 ${FREE_LIMIT} бесплатных рецептов\n`;
-        msg += `📸 Каждый рецепт с фото!\n\n`;
+        msg += '2️⃣ Придумать рецепт из твоих продуктов (например: "яйца помидоры бекон")\n\n';
+        msg += `🎁 ${FREE_LIMIT} бесплатных рецептов\n\n`;
         
         if (sub) {
             const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / 86400000);
@@ -324,14 +139,16 @@ module.exports = (bot, pool, ADMIN_ID) => {
         const hasSub = await hasActiveSubscription(tgId);
         const freeUsed = await getFreeRecipesUsed(tgId);
         
+        // ===== ПРОВЕРКА ЛИМИТА С КНОПКОЙ ОПЛАТЫ =====
         if (!hasSub && freeUsed >= FREE_LIMIT) {
             return ctx.reply(
-                `🔒 Лимит исчерпан!\n\n` +
+                `🔒 <b>Пробная версия завершена!</b>\n\n` +
                 `Вы использовали все ${FREE_LIMIT} бесплатных рецепта.\n\n` +
-                `🌟 PRO Подписка — ${SUB_PRICE}₽/месяц`,
-                { 
+                `📅 Подписка на месяц — <b>${SUB_PRICE}₽</b>\n` +
+                `✅ Неограниченные рецепты`,                { 
+                    parse_mode: 'HTML',
                     reply_markup: Markup.inlineKeyboard([
-                        Markup.button.callback('💳 Оформить подписку', 'pay_subscribe')
+                        Markup.button.callback('💳 Оформить подписку — 500₽', 'pay_subscribe')
                     ])
                 }
             );
@@ -341,7 +158,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
         let loadingMsg, recipe, dishName;
         
         try {
-            if (query.type === 'dish') {                dishName = query.dish;
+            if (query.type === 'dish') {
+                dishName = query.dish;
                 loadingMsg = await ctx.reply(`🍽️ Ищу рецепт: ${dishName}...\n⏱ 1-2 минуты`);
                 
                 const response = await giga.chat({
@@ -377,7 +195,6 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
 (минимум 5-6 шагов с ТОЧНЫМ временем!)
 
-
 🎯 СОВЕТЫ ШЕФА:
 💡 Совет 1
 💡 Совет 2
@@ -391,6 +208,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 🧈 Жиры: X г
 
 🍷 ИДЕАЛЬНАЯ ПАРА: напиток
+
 ⏱ ОБЩЕЕ ВРЕМЯ: X минут
 📊 СЛОЖНОСТЬ: ⭐⭐☆☆☆
 👥 ПОРЦИЙ: X персоны
@@ -425,8 +243,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                             content: `Ты — креативный шеф-повар. Создаёшь рецепты ТОЛЬКО из указанных продуктов.
 
 ПРАВИЛА:
-1. Используй ТОЛЬКО перечисленные продукты (можно базовые: соль, перец, масло)
-2. Не добавляй ингредиенты, которых нет в списке
+1. Используй ТОЛЬКО перечисленные продукты (можно базовые: соль, перец, масло)2. Не добавляй ингредиенты, которых нет в списке
 3. Если продуктов мало — предложи простое блюдо
 
 СТРУКТУРА:
@@ -439,6 +256,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
 
 🍜 продукт 1 — количество
 🥚 продукт 2 — количество
+
 
 👨‍🍳 ПРИГОТОВЛЕНИЕ:
 
@@ -474,8 +292,7 @@ module.exports = (bot, pool, ADMIN_ID) => {
                             role: 'user', 
                             content: `Придумай рецепт из этих продуктов: ${text}. Используй только их (можно соль, перец, масло)!` 
                         }
-                    ],
-                    max_tokens: 1800,
+                    ],                    max_tokens: 1800,
                     temperature: 0.9
                 });
                 
@@ -486,23 +303,10 @@ module.exports = (bot, pool, ADMIN_ID) => {
                 await ctx.deleteMessage(loadingMsg.message_id);
             } catch (e) {}
             
+            // Отправляем рецепт
             await ctx.reply(recipe);
             
-            // Ищем фото с 4 уровнями поиска!            const photoMsg = await ctx.reply('📸 Подбираю фото...');
-            
-            const photoUrl = await findFoodPhoto(dishName, text);
-            
-            try {
-                await ctx.deleteMessage(photoMsg.message_id);
-            } catch (e) {}
-            
-            const caption = `📸 ${dishName}\nПриятного аппетита! 😋`;
-            const sent = await sendPhotoWithRetry(ctx, photoUrl, caption);
-            
-            if (!sent) {
-                await ctx.reply('📸 Фото не загрузилось, но рецепт отличный! 😊');
-            }
-            
+            // Считаем рецепты
             if (!hasSub) {
                 await incrementFreeRecipes(tgId);
                 const left = FREE_LIMIT - (freeUsed + 1);
@@ -520,26 +324,24 @@ module.exports = (bot, pool, ADMIN_ID) => {
         }
     });
 
-    // ===== ОПЛАТА =====
+    // ===== КНОПКА ОПЛАТЫ =====
     bot.action('pay_subscribe', async (ctx) => {
         await ctx.answerCbQuery();
         
-        const SBP_PHONE = process.env.SBP_PHONE || '+79022231321';
-        const SBP_RECIPIENT = process.env.SBP_RECIPIENT || 'Ермачкова Алина В.';
-        
         const paymentMsg = 
-            `💳 Оплата PRO подписки — ${SUB_PRICE}₽/месяц\n\n` +
-            `1️⃣ Переведите ${SUB_PRICE}₽ по СБП:\n` +
-            `📱 Номер: ${SBP_PHONE}\n` +
-            `👤 Получатель: ${SBP_RECIPIENT}\n\n` +
-            `2️⃣ Пришлите чек сюда\n\n` +
-            `⏱ Активация в течение 5 минут.`;
+            `💳 <b>Оплата подписки — ${SUB_PRICE}₽ / месяц</b>\n\n` +
+            `1️⃣ Переведите <b>${SUB_PRICE}₽</b> по СБП:\n` +
+            `📱 Номер: <code>${SBP_PHONE}</code>\n` +
+            `👤 Получатель: ${SBP_RECIPIENT}\n` +
+            `🏦 Банки: 🟢 Сбер,  ВТБ, 🟡 Т-банк\n\n` +
+            `2️⃣ После оплаты пришлите сюда <b>чек</b> (скриншот или PDF).\n\n` +
+            `⏱ Подписка активируется в течение 5 минут после проверки.`;
 
-        ctx.reply(paymentMsg);
+        ctx.reply(paymentMsg, { parse_mode: 'HTML' });
     });
-    // ===== ЧЕКИ =====
-    bot.on(['photo', 'document'], async (ctx) => {
-        const tgId = ctx.from.id;
+
+    // ===== ПРИЁМ ЧЕКОВ =====
+    bot.on(['photo', 'document'], async (ctx) => {        const tgId = ctx.from.id;
         const user = await getUser(tgId);
         
         if (!user) {
@@ -569,24 +371,29 @@ module.exports = (bot, pool, ADMIN_ID) => {
             const paymentId = rows[0].id;
             
             await ctx.reply(
-                `✅ Чек получен!\n\n` +
-                `📋 Заявка #${paymentId}\n` +
-                `⏱ Активация в течение 5 минут`
+                `✅ <b>Чек получен!</b>\n\n` +
+                `📋 <b>Заявка #${paymentId}</b> принята в обработку\n` +
+                `⏱ Активация в течение 5 минут`,
+                { parse_mode: 'HTML' }
             );
             
+            // Уведомление админу
             if (ADMIN_ID) {
                 try {
                     const currentUser = await getUser(tgId);
                     const fileLink = await ctx.telegram.getFileLink(fileId);
                     
                     const adminMsg = 
-                        `🔔 Новая оплата!\n\n` +
-                        `📋 Заявка #${paymentId}\n\n` +
-                        `👤 ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
-                        `💰 ${SUB_PRICE}₽\n\n` +
-                        `📎 Чек: ${fileLink}`;
-                    
-                    await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {                        reply_markup: {
+                        `🔔 <b>Новая оплата!</b>\n\n` +
+                        `📋 <b>Заявка #${paymentId}</b>\n\n` +
+                        `👤 <b>Пользователь:</b> ${currentUser?.first_name || 'Unknown'} (@${currentUser?.username || 'нет'})\n` +
+                        `🆔 <b>TG ID:</b> <code>${tgId}</code>\n` +
+                        `💰 <b>Сумма:</b> ${SUB_PRICE}₽\n\n` +
+                        `📎 <b>Чек:</b> <a href="${fileLink}">Открыть файл</a>\n\n` +
+                        `<i>Нажмите кнопку для подтверждения</i>`;                    
+                    await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, {
+                        parse_mode: 'HTML',
+                        reply_markup: {
                             inline_keyboard: [
                                 [
                                     { text: '✅ Подтвердить', callback_data: `approve_${paymentId}` },
@@ -595,6 +402,8 @@ module.exports = (bot, pool, ADMIN_ID) => {
                             ]
                         }
                     });
+                    
+                    console.log(`✅ Уведомление админу (чек #${paymentId})`);
                     
                 } catch (notifyErr) {
                     console.error('Notify error:', notifyErr.message);
