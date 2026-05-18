@@ -227,32 +227,37 @@ ${details ? `Условия: ${details}` : ''}
         return rows[0];
     }
 
-    // =========================
-    // UI: Меню подписок
-    // =========================
-    async function sendSubscriptionMenu(ctx) {
-        return ctx.reply(
-            `🎯 <b>Вы использовали все 3 пробных рецепта!</b>
+   
+ // =========================
+// UI: Меню подписок
+// =========================
+async function sendSubscriptionMenu(ctx) {
+    const keyboard = Markup.inlineKeyboard([
+        Markup.button.callback('💰 Оплатить PRO версию', 'pay_pro'),
+        Markup.button.callback('💎 Оплатить VIP версию', 'pay_vip')
+    ]);
+
+    const message = `🎯 <b>Вы использовали все 3 пробных рецепта!</b>
 
 Чтобы продолжить пользоваться <b>Шеф-Поваром AI</b>, выберите подписку:
 
 💳 <b>PRO — ${PRO_PRICE}₽ / месяц</b>
-• Неограниченное количество запросов к боту
+• Неограниченное количество запросов
 • Все базовые рецепты
+
 💎 <b>VIP — ${VIP_PRICE}₽ / месяц</b>
 • Всё из PRO +
-• 📅 Меню от ИИ: день / неделя / 2 недели / месяц
-• 🥗 ИИ-Диетолог: похудение / набор массы / поддержание веса
-• 🥗 Только ПП-блюда (по запросу)• 🔢 Счётчик калорий и КБЖУ для каждого блюда`,
-            {
-                parse_mode: 'HTML',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.callback(`💰 Оплатить PRO версию`, 'pay_pro')],
-                    [Markup.button.callback(`💎 Оплатить VIP версию`, 'pay_vip')]
-                ])
-            }
-        );
-    }
+• 📅 Меню от ИИ
+• 🥗 ИИ-Диетолог  
+• 🔢 КБЖУ и калории`;
+
+    return ctx.reply(message, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+    });
+}
+    
+           
 
     // =========================
     // UI: Инструкция по оплате
@@ -311,43 +316,63 @@ ${subscription.plan_type === 'VIP' ? '\n✨ VIP-доступ: /weekmenu — ме
         );
     });
 
-    // =========================
-    // PAYMENT FLOW
-    // =========================
-    bot.action('pay_pro', async (ctx) => {
-        await ctx.answerCbQuery();
-        userStates[ctx.from.id] = { payingFor: 'PRO', amount: PRO_PRICE };
-        
-        await ctx.editMessageText(
-            getPaymentInstruction('PRO', PRO_PRICE),
-            {
-                parse_mode: 'HTML',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')]
-                ])
-            }
-        );
-    });
+  
+ // =========================
+// PAYMENT FLOW
+// =========================
+bot.action('pay_pro', async (ctx) => {
+    await ctx.answerCbQuery();
+    userStates[ctx.from.id] = { payingFor: 'PRO', amount: PRO_PRICE };
+    
+    await ctx.editMessageText(
+        `💳 <b>PRO подписка — ${PRO_PRICE}₽/мес</b>
 
-    bot.action('pay_vip', async (ctx) => {
-        await ctx.answerCbQuery();
-        userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };
-        
-        await ctx.editMessageText(
-            getPaymentInstruction('VIP', VIP_PRICE),
-            {
-                parse_mode: 'HTML',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')]
-                ])
-            }
-        );    });
+1️⃣ Переведите ${PRO_PRICE}₽ по СБП:
+📱 <code>${SBP_PHONE}</code>
+👤 ${SBP_RECIPIENT}
+🏦 Сбер, ВТБ, Т-банк
 
-    bot.action('show_subscriptions', async (ctx) => {
-        await ctx.answerCbQuery();
-        delete userStates[ctx.from.id];
-        await sendSubscriptionMenu(ctx);
-    });
+2️⃣ Пришлите чек сюда (фото/PDF)
+
+⏱ Активация: ~5 минут`,
+        {
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')
+            ])
+        }
+    );
+});
+
+bot.action('pay_vip', async (ctx) => {
+    await ctx.answerCbQuery();
+    userStates[ctx.from.id] = { payingFor: 'VIP', amount: VIP_PRICE };
+    
+    await ctx.editMessageText(
+        `💎 <b>VIP подписка — ${VIP_PRICE}₽/мес</b>
+
+1️⃣ Переведите ${VIP_PRICE}₽ по СБП:
+📱 <code>${SBP_PHONE}</code>
+👤 ${SBP_RECIPIENT}
+🏦 Сбер, ВТБ, Т-банк
+
+2️⃣ Пришлите чек сюда (фото/PDF)
+
+⏱ Активация: ~5 минут`,
+        {
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                Markup.button.callback('🔙 Назад к тарифам', 'show_subscriptions')
+            ])
+        }
+    );
+});
+
+bot.action('show_subscriptions', async (ctx) => {
+    await ctx.answerCbQuery();
+    delete userStates[ctx.from.id];
+    await sendSubscriptionMenu(ctx);
+});
 
     // =========================
     // RECEIPT HANDLING
