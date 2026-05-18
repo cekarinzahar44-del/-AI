@@ -816,4 +816,137 @@ ${err.message}
             }
         );
     });
+    // =========================
+    // ✅ ADMIN: APPROVE PAYMENT
+    // =========================
+    bot.action(/^approve_(\d+)$/, async (ctx) => {
+        // Проверяем, что нажал админ
+        if (ctx.from.id !== ADMIN_ID) {
+            return ctx.answerCbQuery('🔒 Доступ запрещён', { show_alert: true });
+        }
+
+        const paymentId = ctx.match[1];
+        console.log(`🔄 Админ одобряет заявку #${paymentId}`);
+
+        try {
+            // 1. Получаем данные платежа
+            const { rows: [payment] } = await pool.query(
+                `SELECT * FROM payments WHERE id = $1`,
+                [paymentId]
+            );
+
+            if (!payment) {
+                return ctx.answerCbQuery('❌ Заявка не найдена', { show_alert: true });
+            }
+
+            const userId = payment.user_id;
+            const planType = payment.plan_type;
+
+            // 2. Деактивируем старые подписки пользователя
+            await pool.query(
+                `UPDATE subscriptions SET is_active = FALSE WHERE user_id = $1`,
+                [userId]
+            );
+
+            // 3. Создаём новую активную подписку (30 дней)
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 30);
+
+            await pool.query(
+                `INSERT INTO subscriptions (user_id, is_active, expires_at, plan_type)
+                 VALUES ($1, TRUE, $2, $3)`,
+                [userId, expiresAt, planType]
+            );
+
+            // 4. Сбрасываем счётчик бесплатных рецептов
+            await pool.query(
+                `UPDATE users SET free_recipes_used = 0 WHERE tg_id = $1`,
+                [userId]
+            );
+
+            // 5. Обновляем статус платежа
+            await pool.query(                `UPDATE payments SET status = 'approved' WHERE id = $1`,
+                [paymentId]
+            );
+
+            // 6. Уведомляем админа
+            await ctx.answerCbQuery('✅ Подписка активирована');
+            await ctx.editMessageCaption(
+                `✅ <b>Одобрено</b>\n📋 #${paymentId}\n🔥 ${planType} активирована`,
+                { parse_mode: 'HTML' }
+            );
+
+            // 7. Уведомляем пользователя
+            await ctx.telegram.sendMessage(
+                userId,
+                `🎉 <b>Подписка активирована!</b>\n\n` +
+                `🔥 Тариф: <b>${planType}</b>\n` +
+                `📅 Действует до: ${expiresAt.toLocaleDateString('ru-RU')}\n\n` +
+                `👨‍🍳 Теперь у тебя полный доступ к Шеф-Повар AI!\n` +
+                `${planType === 'VIP' ? '✨ Доступны: /weekmenu — меню, /diet — диетолог' : ''}`,
+                { parse_mode: 'HTML' }
+            );
+
+            console.log(`✅ Подписка ${planType} активирована для пользователя ${userId}`);
+
+        } catch (err) {
+            console.error('❌ APPROVE ERROR:', err);
+            await ctx.answerCbQuery('❌ Ошибка при активации', { show_alert: true });
+        }
+    });
+
+    // =========================
+    // ❌ ADMIN: REJECT PAYMENT
+    // =========================
+    bot.action(/^reject_(\d+)$/, async (ctx) => {
+        if (ctx.from.id !== ADMIN_ID) {
+            return ctx.answerCbQuery('🔒 Доступ запрещён', { show_alert: true });
+        }
+
+        const paymentId = ctx.match[1];
+        console.log(`🔄 Админ отклоняет заявку #${paymentId}`);
+
+        try {
+            // 1. Получаем данные платежа
+            const { rows: [payment] } = await pool.query(
+                `SELECT * FROM payments WHERE id = $1`,
+                [paymentId]
+            );
+
+            if (!payment) {
+                return ctx.answerCbQuery('❌ Заявка не найдена', { show_alert: true });            }
+
+            const userId = payment.user_id;
+
+            // 2. Обновляем статус платежа
+            await pool.query(
+                `UPDATE payments SET status = 'rejected' WHERE id = $1`,
+                [paymentId]
+            );
+
+            // 3. Уведомляем админа
+            await ctx.answerCbQuery('❌ Отклонено');
+            await ctx.editMessageCaption(
+                `❌ <b>Отклонено</b>\n📋 #${paymentId}`,
+                { parse_mode: 'HTML' }
+            );
+
+            // 4. Уведомляем пользователя
+            await ctx.telegram.sendMessage(
+                userId,
+                `❌ <b>Платёж отклонён</b>\n\n` +
+                `📋 Заявка #${paymentId}\n\n` +
+                `Проверь чек и попробуй отправить снова.\n` +
+                `Если проблема не решается — напиши в поддержку.`,
+                { parse_mode: 'HTML' }
+            );
+
+            console.log(`❌ Заявка #${paymentId} отклонена для пользователя ${userId}`);
+
+        } catch (err) {
+            console.error('❌ REJECT ERROR:', err);
+            await ctx.answerCbQuery('❌ Ошибка', { show_alert: true });
+        }
+    });
+
 };
