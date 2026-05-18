@@ -1,4 +1,3 @@
-const { Markup } = require('telegraf');
 const crypto = require('crypto');
 
 const GIGA_CREDENTIALS = process.env.GIGACHAT_CREDENTIALS;
@@ -17,7 +16,6 @@ let cachedToken = null;
 let tokenExpiry = 0;
 
 async function getGigaToken() {
-
     if (cachedToken && Date.now() < tokenExpiry) {
         return cachedToken;
     }
@@ -26,14 +24,12 @@ async function getGigaToken() {
         'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
         {
             method: 'POST',
-
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json',
                 'Authorization': `Basic ${GIGA_CREDENTIALS}`,
                 'RqUID': crypto.randomUUID()
             },
-
             body: 'scope=GIGACHAT_API_PERS'
         }
     );
@@ -41,42 +37,31 @@ async function getGigaToken() {
     const data = await res.json();
 
     if (!res.ok) {
-        throw new Error(
-            `GigaChat Auth Error: ${data.message}`
-        );
+        throw new Error(`GigaChat Auth: ${data.message || res.statusText}`);
     }
 
     cachedToken = data.access_token;
-
-    tokenExpiry =
-        Date.now() + ((data.expires_at || 3600) - 30) * 1000;
+    tokenExpiry = Date.now() + (data.expires_at - 30) * 1000;
 
     return cachedToken;
 }
 
-async function callGigaChat(
-    systemPrompt,
-    userPrompt,
-    maxTokens = 3000,
-    temperature = 0.85
-) {
-
+async function callGigaChat(systemPrompt, userPrompt) {
     const token = await getGigaToken();
 
     const res = await fetch(
         'https://gigachat.devices.sberbank.ru/api/v1/chat/completions',
         {
             method: 'POST',
-
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-
             body: JSON.stringify({
                 model: 'GigaChat',
-
+                temperature: 0.8,
+                max_tokens: 3000,
                 messages: [
                     {
                         role: 'system',
@@ -86,10 +71,7 @@ async function callGigaChat(
                         role: 'user',
                         content: userPrompt
                     }
-                ],
-
-                max_tokens: maxTokens,
-                temperature
+                ]
             })
         }
     );
@@ -97,67 +79,64 @@ async function callGigaChat(
     const data = await res.json();
 
     if (!res.ok) {
-        throw new Error(
-            `GigaChat API Error: ${data.message}`
-        );
+        throw new Error(`GigaChat API: ${data.message || res.statusText}`);
     }
 
     return data.choices[0].message.content;
 }
 
+// =========================
+// CLEAN HTML
+// =========================
+function cleanHtml(text) {
+    if (!text) return '';
+
+    return text
+        .replace(/```html/gi, '')
+        .replace(/```/g, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<html[\s\S]*?>/gi, '')
+        .replace(/<\/html>/gi, '')
+        .replace(/<body[\s\S]*?>/gi, '')
+        .replace(/<\/body>/gi, '')
+        .replace(/<head[\s\S]*?<\/head>/gi, '')
+        .replace(/<h1>/gi, '<b>')
+        .replace(/<\/h1>/gi, '</b>\n')
+        .replace(/<h2>/gi, '<b>')
+        .replace(/<\/h2>/gi, '</b>\n')
+        .replace(/<ul>/gi, '')
+        .replace(/<\/ul>/gi, '')
+        .replace(/<ol.*?>/gi, '')
+        .replace(/<\/ol>/gi, '')
+        .replace(/<li>/gi, '• ')
+        .replace(/<\/li>/gi, '\n')
+        .replace(/\*\*/g, '')
+        .replace(/<br>/gi, '\n')
+        .replace(/<br\/>/gi, '\n')
+        .replace(/<br \/>/gi, '\n')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/<div>/gi, '')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/class=".*?"/gi, '')
+        .replace(/style=".*?"/gi, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+// =========================
+// EXPORT
+// =========================
 module.exports = (bot, pool, ADMIN_ID) => {
 
-    console.log('✅ VIP CHEF BOT LOADED');
+    console.log('✅ VIP Chef Bot loaded');
 
     const userStates = {};
-
-    // =========================
-    // SAFE HTML
-    // =========================
-    function sanitizeHTML(text) {
-
-        if (!text) {
-            return '❌ Пустой ответ';
-        }
-
-        return text
-
-            .replace(/\*\*/g, '')
-
-            .replace(
-                /<b>([^<]+)\*\*/g,
-                '<b>$1</b>'
-            )
-
-            .replace(
-                /\*\*<\/b>/g,
-                '</b>'
-            )
-
-            .replace(
-                /<b>(.*?)$/gm,
-                '<b>$1</b>'
-            )
-
-            .replace(
-                /<([^>]+)$/g,
-                ''
-            )
-
-            .replace(
-                /<\/b><\/b>/g,
-                '</b>'
-            )
-
-            .replace(/undefined/g, '')
-            .replace(/null/g, '');
-    }
 
     // =========================
     // REQUEST TYPE
     // =========================
     function detectRequestType(text) {
-
         const lower = text.toLowerCase();
 
         const dishKeywords = [
@@ -166,19 +145,19 @@ module.exports = (bot, pool, ADMIN_ID) => {
             'хочу',
             'сделай',
             'как сделать',
-            'карбонара',
             'борщ',
             'салат',
             'суп',
+            'паста',
+            'карбонара',
+            'омлет',
+            'плов',
             'котлеты',
             'торт',
-            'паста',
             'десерт'
         ];
 
-        if (
-            dishKeywords.some(x => lower.includes(x))
-        ) {
+        if (dishKeywords.some(k => lower.includes(k))) {
             return 'dish';
         }
 
@@ -190,128 +169,105 @@ module.exports = (bot, pool, ADMIN_ID) => {
     }
 
     // =========================
-    // PROMPT
+    // BUILD PROMPT
     // =========================
-    function buildPrompt(
-        requestType,
-        ingredients,
-        details,
-        planType
-    ) {
+    function buildPrompt(requestType, ingredients, details, planType) {
 
         const isVIP = planType === 'VIP';
 
-        let vipText = '';
-
-        if (isVIP) {
-
-            vipText = `
-✨ VIP:
-• КБЖУ
-• Диетолог
-• ПП рекомендации
-`;
-        }
-
         const system = `
-Ты профессиональный ИИ ШЕФ-ПОВАР.
+Ты элитный ИИ Шеф-Повар.
 
-Структура:
+ВАЖНО:
+• Используй ТОЛЬКО Telegram HTML
+• Разрешены ТОЛЬКО теги:
+<b>, <i>
 
-1️⃣ <b>Название блюда</b>
+ЗАПРЕЩЕНО:
+❌ <style>
+❌ <script>
+❌ <h1>
+❌ <ul>
+❌ <ol>
+❌ <li>
+❌ markdown **
+❌ любые другие html теги
 
-2️⃣ <b>Описание</b>
+Структура ответа:
 
-3️⃣ <b>Ингредиенты</b>
+<b>🍽 Название блюда</b>
 
-4️⃣ <b>Метод приготовления</b>
+<b>Описание</b>
+Описание блюда
 
-5️⃣ <b>Пошаговое приготовление</b>
+<b>Ингредиенты</b>
+• ингредиент
+• ингредиент
 
-6️⃣ <b>Советы</b>
+<b>Метод приготовления</b>
+Описание
 
-7️⃣ <b>Напитки</b>
+<b>Пошаговое приготовление</b>
+1. Шаг
+2. Шаг
 
-Используй HTML.
-Не используй markdown **
+<b>Советы</b>
+Советы
 
-${vipText}
+<b>Напитки</b>
+Напитки
+
+${isVIP ? 'Добавь КБЖУ.' : ''}
 `;
 
         if (requestType === 'ingredients') {
-
             return {
-
                 system,
-
                 user: `
-Приготовь блюдо ТОЛЬКО из:
+Приготовь блюдо ТОЛЬКО из этих ингредиентов:
 
 ${ingredients}
 
 Дополнительно:
-
-${details || 'без ограничений'}
+${details}
 `
             };
         }
 
         return {
-
             system,
-
             user: `
-Пользователь хочет рецепт:
-
+Запрос блюда:
 ${ingredients}
 
 Дополнительно:
-
-${details || 'без ограничений'}
+${details}
 `
         };
     }
 
     // =========================
-    // DB
+    // DB HELPERS
     // =========================
-    async function createUser(
-        tgId,
-        username,
-        firstName
-    ) {
-
+    async function createUser(tgId, username, firstName) {
         await pool.query(
             `
-            INSERT INTO users
-            (
+            INSERT INTO users (
                 tg_id,
                 username,
                 first_name,
                 free_recipes_used
             )
-
-            VALUES ($1, $2, $3, 0)
-
-            ON CONFLICT (tg_id)
-            DO NOTHING
+            VALUES ($1,$2,$3,0)
+            ON CONFLICT (tg_id) DO NOTHING
             `,
-            [
-                tgId,
-                username,
-                firstName
-            ]
+            [tgId, username, firstName]
         );
     }
 
     async function getUser(tgId) {
-
         const { rows } = await pool.query(
-            `
-            SELECT *
-            FROM users
-            WHERE tg_id = $1
-            `,
+            `SELECT * FROM users WHERE tg_id = $1`,
             [tgId]
         );
 
@@ -319,21 +275,15 @@ ${details || 'без ограничений'}
     }
 
     async function getFreeRecipesUsed(tgId) {
-
         const user = await getUser(tgId);
-
         return user?.free_recipes_used || 0;
     }
 
     async function incrementFreeRecipes(tgId) {
-
         await pool.query(
             `
             UPDATE users
-
-            SET free_recipes_used =
-            free_recipes_used + 1
-
+            SET free_recipes_used = free_recipes_used + 1
             WHERE tg_id = $1
             `,
             [tgId]
@@ -341,13 +291,10 @@ ${details || 'без ограничений'}
     }
 
     async function resetFreeRecipes(tgId) {
-
         await pool.query(
             `
             UPDATE users
-
             SET free_recipes_used = 0
-
             WHERE tg_id = $1
             `,
             [tgId]
@@ -355,17 +302,13 @@ ${details || 'без ограничений'}
     }
 
     async function hasSubscription(tgId) {
-
         const { rows } = await pool.query(
             `
             SELECT *
-
             FROM subscriptions
-
             WHERE user_id = $1
             AND is_active = TRUE
             AND expires_at > NOW()
-
             LIMIT 1
             `,
             [tgId]
@@ -380,31 +323,27 @@ ${details || 'без ограничений'}
     async function sendSubscriptionMenu(ctx) {
 
         return ctx.reply(
-            `
-🎯 <b>Пробный лимит закончился</b>
+            `🎯 <b>Пробный лимит закончился</b>
+
+Выберите подписку:
 
 💳 <b>PRO — ${PRO_PRICE}₽</b>
-• Безлимит рецептов
 
 💎 <b>VIP — ${VIP_PRICE}₽</b>
-• Всё из PRO
-• ИИ Диетолог
-• Меню
+• ИИ диетолог
 • КБЖУ
-• ПП рецепты
+• Меню на неделю
 `,
             {
                 parse_mode: 'HTML',
-
                 reply_markup: {
                     inline_keyboard: [
                         [
                             {
-                                text: '💳 Купить PRO',
+                                text: '💰 Купить PRO',
                                 callback_data: 'pay_pro'
                             }
                         ],
-
                         [
                             {
                                 text: '💎 Купить VIP',
@@ -420,18 +359,14 @@ ${details || 'без ограничений'}
     // =========================
     // PAYMENT TEXT
     // =========================
-    function getPaymentInstruction(
-        plan,
-        amount
-    ) {
+    function getPaymentInstruction(planType, amount) {
 
         return `
-💳 <b>Оплата ${plan}</b>
+💳 <b>Оплата ${planType}</b>
 
-💰 Сумма:
-<b>${amount}₽</b>
+Сумма: <b>${amount}₽</b>
 
-📱 СБП:
+📱 Номер:
 <code>${SBP_PHONE}</code>
 
 👤 Получатель:
@@ -446,9 +381,7 @@ ${SBP_RECIPIENT}
     // =========================
     bot.start(async (ctx) => {
 
-        if (ctx.from.id === ADMIN_ID) {
-            return;
-        }
+        if (ctx.from.id === ADMIN_ID) return;
 
         const tgId = ctx.from.id;
 
@@ -458,11 +391,9 @@ ${SBP_RECIPIENT}
             ctx.from.first_name
         );
 
-        const subscription =
-            await hasSubscription(tgId);
+        const subscription = await hasSubscription(tgId);
 
-        const freeUsed =
-            await getFreeRecipesUsed(tgId);
+        const freeUsed = await getFreeRecipesUsed(tgId);
 
         if (subscription) {
 
@@ -473,21 +404,10 @@ ${SBP_RECIPIENT}
 🔥 Тариф:
 <b>${subscription.plan_type}</b>
 
-Напишите блюдо или ингредиенты.
+Напишите рецепт или ингредиенты.
 `,
                 {
-                    parse_mode: 'HTML',
-
-                    reply_markup: {
-                        keyboard: [
-                            ['🍳 Рецепт'],
-                            ['📅 Меню'],
-                            ['🥗 Диетолог'],
-                            ['💎 Подписка']
-                        ],
-
-                        resize_keyboard: true
-                    }
+                    parse_mode: 'HTML'
                 }
             );
         }
@@ -496,766 +416,188 @@ ${SBP_RECIPIENT}
             return sendSubscriptionMenu(ctx);
         }
 
-        const left =
-            FREE_LIMIT - freeUsed;
+        const left = FREE_LIMIT - freeUsed;
 
         await ctx.reply(
             `
 👨‍🍳 <b>Шеф-Повар AI</b>
 
-🍽 Отправьте:
-• ингредиенты
-• или название блюда
-
-🎁 Осталось:
+🍽 Осталось бесплатных рецептов:
 <b>${left}</b>
 `,
             {
-                parse_mode: 'HTML',
-
-                reply_markup: {
-                    keyboard: [
-                        ['🍳 Рецепт'],
-                        ['💎 Подписка']
-                    ],
-
-                    resize_keyboard: true
-                }
+                parse_mode: 'HTML'
             }
         );
     });
 
     // =========================
-    // BUTTONS
+    // PAY BUTTONS
     // =========================
-    bot.hears(
-        '💎 Подписка',
-        async (ctx) => {
+    bot.action('pay_pro', async (ctx) => {
 
-            await sendSubscriptionMenu(ctx);
-        }
-    );
+        await ctx.answerCbQuery();
 
-    bot.hears(
-        '📅 Меню',
-        async (ctx) => {
+        userStates[ctx.from.id] = {
+            payingFor: 'PRO',
+            amount: PRO_PRICE
+        };
 
-            await ctx.reply('/weekmenu');
-        }
-    );
-
-    bot.hears(
-        '🥗 Диетолог',
-        async (ctx) => {
-
-            await ctx.reply('/diet');
-        }
-    );
-
-    // =========================
-    // PAYMENT FLOW
-    // =========================
-    bot.action(
-        'pay_pro',
-        async (ctx) => {
-
-            await ctx.answerCbQuery();
-
-            userStates[ctx.from.id] = {
-                payingFor: 'PRO',
-                amount: PRO_PRICE
-            };
-
-            await ctx.editMessageText(
-                getPaymentInstruction(
-                    'PRO',
-                    PRO_PRICE
-                ),
-                {
-                    parse_mode: 'HTML',
-
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: '🔙 Назад',
-                                    callback_data:
-                                        'show_subscriptions'
-                                }
-                            ]
+        await ctx.editMessageText(
+            getPaymentInstruction('PRO', PRO_PRICE),
+            {
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: '🔙 Назад',
+                                callback_data: 'show_subscriptions'
+                            }
                         ]
-                    }
+                    ]
                 }
-            );
-        }
-    );
+            }
+        );
+    });
 
-    bot.action(
-        'pay_vip',
-        async (ctx) => {
+    bot.action('pay_vip', async (ctx) => {
 
-            await ctx.answerCbQuery();
+        await ctx.answerCbQuery();
 
-            userStates[ctx.from.id] = {
-                payingFor: 'VIP',
-                amount: VIP_PRICE
-            };
+        userStates[ctx.from.id] = {
+            payingFor: 'VIP',
+            amount: VIP_PRICE
+        };
 
-            await ctx.editMessageText(
-                getPaymentInstruction(
-                    'VIP',
-                    VIP_PRICE
-                ),
-                {
-                    parse_mode: 'HTML',
-
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: '🔙 Назад',
-                                    callback_data:
-                                        'show_subscriptions'
-                                }
-                            ]
+        await ctx.editMessageText(
+            getPaymentInstruction('VIP', VIP_PRICE),
+            {
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: '🔙 Назад',
+                                callback_data: 'show_subscriptions'
+                            }
                         ]
-                    }
-                }
-            );
-        }
-    );
-
-    bot.action(
-        'show_subscriptions',
-        async (ctx) => {
-
-            await ctx.answerCbQuery();
-
-            delete userStates[
-                ctx.from.id
-            ];
-
-            await sendSubscriptionMenu(ctx);
-        }
-    );
-
-    // =========================
-    // RECEIPT
-    // =========================
-    bot.on(
-        ['photo', 'document'],
-        async (ctx) => {
-
-            const tgId = ctx.from.id;
-
-            const state =
-                userStates[tgId];
-
-            if (!state?.payingFor) {
-
-                return ctx.reply(
-                    '📎 Сначала выберите подписку'
-                );
-            }
-
-            let fileId;
-
-            if (ctx.message.photo) {
-
-                fileId =
-                    ctx.message.photo[
-                        ctx.message.photo.length - 1
-                    ].file_id;
-            }
-
-            if (ctx.message.document) {
-
-                fileId =
-                    ctx.message.document.file_id;
-            }
-
-            const { rows } =
-                await pool.query(
-                    `
-                    INSERT INTO payments
-                    (
-                        user_id,
-                        amount,
-                        receipt_file_id,
-                        status,
-                        plan_type
-                    )
-
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        $3,
-                        'pending',
-                        $4
-                    )
-
-                    RETURNING id
-                    `,
-                    [
-                        tgId,
-                        state.amount,
-                        fileId,
-                        state.payingFor
                     ]
-                );
+                }
+            }
+        );
+    });
 
-            const paymentId =
-                rows[0].id;
+    bot.action('show_subscriptions', async (ctx) => {
 
-            await ctx.reply(
-                `✅ Чек отправлен #${paymentId}`
+        await ctx.answerCbQuery();
+
+        delete userStates[ctx.from.id];
+
+        await sendSubscriptionMenu(ctx);
+    });
+
+    // =========================
+    // RECEIPTS
+    // =========================
+    bot.on(['photo', 'document'], async (ctx) => {
+
+        const tgId = ctx.from.id;
+
+        const state = userStates[tgId];
+
+        if (!state?.payingFor) {
+            return ctx.reply(
+                '📎 Чек принимается только при оплате.'
             );
+        }
 
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        {
-                            text: '✅ Одобрить',
-                            callback_data:
-                                `approve_${paymentId}`
-                        }
-                    ],
+        let fileId = null;
 
-                    [
-                        {
-                            text: '❌ Отклонить',
-                            callback_data:
-                                `reject_${paymentId}`
-                        }
-                    ]
-                ]
-            };
+        if (ctx.message.photo) {
+            fileId =
+                ctx.message.photo[
+                    ctx.message.photo.length - 1
+                ].file_id;
+        }
 
-            await ctx.telegram.sendMessage(
-                ADMIN_ID,
+        if (ctx.message.document) {
+            fileId = ctx.message.document.file_id;
+        }
 
-                `
-💰 Новая заявка
+        if (!fileId) return;
 
-ID: ${paymentId}
+        const { rows } = await pool.query(
+            `
+            INSERT INTO payments (
+                user_id,
+                amount,
+                receipt_file_id,
+                status,
+                plan_type
+            )
+            VALUES ($1,$2,$3,'pending',$4)
+            RETURNING id
+            `,
+            [
+                tgId,
+                state.amount,
+                fileId,
+                state.payingFor
+            ]
+        );
 
-USER: ${tgId}
+        const paymentId = rows[0].id;
 
-Тариф:
-${state.payingFor}
+        delete userStates[tgId];
+
+        await ctx.reply(
+            `
+✅ <b>Чек получен</b>
+
+Заявка #${paymentId}
 `,
-                {
-                    reply_markup: keyboard
-                }
-            );
+            {
+                parse_mode: 'HTML'
+            }
+        );
+    });
 
-            delete userStates[tgId];
+    // =========================
+    // MAIN TEXT
+    // =========================
+    bot.on('text', async (ctx) => {
+
+        const text = ctx.message.text?.trim();
+
+        if (!text) return;
+
+        if (text.startsWith('/')) return;
+
+        const tgId = ctx.from.id;
+
+        if (tgId === ADMIN_ID) return;
+
+        await createUser(
+            tgId,
+            ctx.from.username,
+            ctx.from.first_name
+        );
+
+        const subscription = await hasSubscription(tgId);
+
+        const freeUsed = await getFreeRecipesUsed(tgId);
+
+        if (!subscription && freeUsed >= FREE_LIMIT) {
+            return sendSubscriptionMenu(ctx);
         }
-    );
 
-    // =========================
-    // APPROVE
-    // =========================
-    bot.action(
-        /^approve_(\d+)$/,
-        async (ctx) => {
+        const state = userStates[tgId];
 
-            if (
-                ctx.from.id !== ADMIN_ID
-            ) {
-                return;
-            }
+        // STEP 1
+        if (!state) {
 
-            const paymentId =
-                ctx.match[1];
-
-            const { rows } =
-                await pool.query(
-                    `
-                    SELECT *
-
-                    FROM payments
-
-                    WHERE id = $1
-                    `,
-                    [paymentId]
-                );
-
-            const payment = rows[0];
-
-            if (!payment) {
-                return;
-            }
-
-            const expiresAt =
-                new Date();
-
-            expiresAt.setDate(
-                expiresAt.getDate() + 30
-            );
-
-            await pool.query(
-                `
-                UPDATE subscriptions
-
-                SET is_active = FALSE
-
-                WHERE user_id = $1
-                `,
-                [payment.user_id]
-            );
-
-            await pool.query(
-                `
-                INSERT INTO subscriptions
-                (
-                    user_id,
-                    is_active,
-                    expires_at,
-                    plan_type
-                )
-
-                VALUES
-                (
-                    $1,
-                    TRUE,
-                    $2,
-                    $3
-                )
-                `,
-                [
-                    payment.user_id,
-                    expiresAt,
-                    payment.plan_type
-                ]
-            );
-
-            await pool.query(
-                `
-                UPDATE payments
-
-                SET status = 'approved'
-
-                WHERE id = $1
-                `,
-                [paymentId]
-            );
-
-            await resetFreeRecipes(
-                payment.user_id
-            );
-
-            await ctx.answerCbQuery(
-                '✅ Одобрено'
-            );
-
-            await ctx.editMessageText(
-                `✅ Заявка #${paymentId} одобрена`
-            );
-
-            await ctx.telegram.sendMessage(
-                payment.user_id,
-
-                `
-🎉 <b>Подписка активирована</b>
-
-🔥 Тариф:
-<b>${payment.plan_type}</b>
-
-📅 До:
-${expiresAt.toLocaleDateString('ru-RU')}
-`,
-                {
-                    parse_mode: 'HTML'
-                }
-            );
-        }
-    );
-
-    // =========================
-    // REJECT
-    // =========================
-    bot.action(
-        /^reject_(\d+)$/,
-        async (ctx) => {
-
-            if (
-                ctx.from.id !== ADMIN_ID
-            ) {
-                return;
-            }
-
-            const paymentId =
-                ctx.match[1];
-
-            await pool.query(
-                `
-                UPDATE payments
-
-                SET status = 'rejected'
-
-                WHERE id = $1
-                `,
-                [paymentId]
-            );
-
-            await ctx.answerCbQuery(
-                '❌ Отклонено'
-            );
-
-            await ctx.editMessageText(
-                `❌ Заявка #${paymentId} отклонена`
-            );
-        }
-    );
-
-    // =========================
-    // WEEK MENU
-    // =========================
-    bot.command(
-        'weekmenu',
-        async (ctx) => {
-
-            const subscription =
-                await hasSubscription(
-                    ctx.from.id
-                );
-
-            if (
-                !subscription ||
-                subscription.plan_type !==
-                    'VIP'
-            ) {
-
-                return ctx.reply(
-                    '🔒 Только VIP'
-                );
-            }
-
-            userStates[ctx.from.id] = {
-                mode: 'weekmenu'
-            };
-
-            await ctx.reply(
-                `
-📅 Укажите:
-
-• количество человек
-• период
-• бюджет
-• тип питания
-`
-            );
-        }
-    );
-
-    // =========================
-    // DIET
-    // =========================
-    bot.command(
-        'diet',
-        async (ctx) => {
-
-            const subscription =
-                await hasSubscription(
-                    ctx.from.id
-                );
-
-            if (
-                !subscription ||
-                subscription.plan_type !==
-                    'VIP'
-            ) {
-
-                return ctx.reply(
-                    '🔒 Только VIP'
-                );
-            }
-
-            userStates[ctx.from.id] = {
-                mode: 'diet'
-            };
-
-            await ctx.reply(
-                `
-🥗 Укажите:
-
-• рост
-• вес
-• возраст
-• цель
-`
-            );
-        }
-    );
-
-    // =========================
-    // TEXT
-    // =========================
-    bot.on(
-        'text',
-        async (ctx) => {
-
-            const text =
-                ctx.message.text.trim();
-
-            if (
-                text.startsWith('/')
-            ) {
-                return;
-            }
-
-            const tgId =
-                ctx.from.id;
-
-            if (
-                tgId === ADMIN_ID
-            ) {
-                return;
-            }
-
-            const state =
-                userStates[tgId];
-
-            // =========================
-            // WEEK MENU
-            // =========================
-            if (
-                state?.mode ===
-                'weekmenu'
-            ) {
-
-                const loading =
-                    await ctx.reply(
-                        '📅 Составляю меню...'
-                    );
-
-                try {
-
-                    const result =
-                        await callGigaChat(
-                            `
-Ты профессиональный шеф-повар и нутрициолог.
-
-Составь меню.
-`,
-                            text,
-                            3000,
-                            0.8
-                        );
-
-                    const safeResult =
-                        sanitizeHTML(
-                            result
-                        );
-
-                    try {
-
-                        await ctx.deleteMessage(
-                            loading.message_id
-                        );
-
-                    } catch {}
-
-                    await ctx.reply(
-                        safeResult,
-                        {
-                            parse_mode:
-                                'HTML'
-                        }
-                    );
-
-                } catch (e) {
-
-                    console.log(e);
-
-                    await ctx.reply(
-                        '❌ Ошибка меню'
-                    );
-                }
-
-                delete userStates[
-                    tgId
-                ];
-
-                return;
-            }
-
-            // =========================
-            // DIET
-            // =========================
-            if (
-                state?.mode ===
-                'diet'
-            ) {
-
-                const loading =
-                    await ctx.reply(
-                        '🥗 Анализирую...'
-                    );
-
-                try {
-
-                    const result =
-                        await callGigaChat(
-                            `
-Ты профессиональный диетолог.
-`,
-                            text,
-                            3000,
-                            0.8
-                        );
-
-                    const safeResult =
-                        sanitizeHTML(
-                            result
-                        );
-
-                    try {
-
-                        await ctx.deleteMessage(
-                            loading.message_id
-                        );
-
-                    } catch {}
-
-                    await ctx.reply(
-                        safeResult,
-                        {
-                            parse_mode:
-                                'HTML'
-                        }
-                    );
-
-                } catch (e) {
-
-                    console.log(e);
-
-                    await ctx.reply(
-                        '❌ Ошибка диетолога'
-                    );
-                }
-
-                delete userStates[
-                    tgId
-                ];
-
-                return;
-            }
-
-            // =========================
-            // DETAILS
-            // =========================
-            if (
-                state?.step ===
-                'details'
-            ) {
-
-                const details = text;
-
-                delete userStates[
-                    tgId
-                ];
-
-                const loading =
-                    await ctx.reply(
-                        '👨‍🍳 Готовлю рецепт...'
-                    );
-
-                try {
-
-                    const subscription =
-                        await hasSubscription(
-                            tgId
-                        );
-
-                    const planType =
-                        subscription?.plan_type ||
-                        'FREE';
-
-                    const {
-                        system,
-                        user
-                    } = buildPrompt(
-                        state.requestType,
-                        state.ingredients,
-                        details,
-                        planType
-                    );
-
-                    const recipe =
-                        await callGigaChat(
-                            system,
-                            user,
-                            3000,
-                            0.85
-                        );
-
-                    const safeRecipe =
-                        sanitizeHTML(
-                            recipe
-                        );
-
-                    try {
-
-                        await ctx.deleteMessage(
-                            loading.message_id
-                        );
-
-                    } catch {}
-
-                    await ctx.reply(
-                        safeRecipe,
-                        {
-                            parse_mode:
-                                'HTML'
-                        }
-                    );
-
-                    if (
-                        !subscription
-                    ) {
-
-                        await incrementFreeRecipes(
-                            tgId
-                        );
-
-                        const used =
-                            await getFreeRecipesUsed(
-                                tgId
-                            );
-
-                        if (
-                            used >=
-                            FREE_LIMIT
-                        ) {
-
-                            await sendSubscriptionMenu(
-                                ctx
-                            );
-                        }
-                    }
-
-                } catch (e) {
-
-                    console.log(e);
-
-                    await ctx.reply(
-                        '❌ Ошибка генерации рецепта'
-                    );
-                }
-
-                return;
-            }
-
-            // =========================
-            // FIRST MESSAGE
-            // =========================
-            const requestType =
-                detectRequestType(
-                    text
-                );
+            const requestType = detectRequestType(text);
 
             userStates[tgId] = {
                 requestType,
@@ -1263,16 +605,162 @@ ${expiresAt.toLocaleDateString('ru-RU')}
                 step: 'details'
             };
 
-            await ctx.reply(
+            return ctx.reply(
                 `
-👨‍🍳 Уточните:
+👨‍🍳 Укажите:
 
-👥 На сколько порций?
-
-🥗 Есть предпочтения?
-`
+👥 Количество порций
+🥗 Предпочтения
+`,
+                {
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        keyboard: [
+                            ['🥗 ПП'],
+                            ['🔥 Низкокалорийное'],
+                            ['💪 Набор массы']
+                        ],
+                        resize_keyboard: true
+                    }
+                }
             );
         }
-    );
 
+        // STEP 2
+        if (state.step === 'details') {
+
+            delete userStates[tgId];
+
+            const loading = await ctx.reply(
+                '👨‍🍳 Готовлю рецепт...'
+            );
+
+            try {
+
+                const planType =
+                    subscription?.plan_type || 'FREE';
+
+                const prompt = buildPrompt(
+                    state.requestType,
+                    state.ingredients,
+                    text,
+                    planType
+                );
+
+                let recipe = await callGigaChat(
+                    prompt.system,
+                    prompt.user
+                );
+
+                recipe = cleanHtml(recipe);
+
+                try {
+                    await ctx.deleteMessage(
+                        loading.message_id
+                    );
+                } catch {}
+
+                await ctx.reply(
+                    recipe,
+                    {
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            keyboard: [
+                                ['🍽 Новый рецепт'],
+                                ['📅 Меню на неделю'],
+                                ['💎 VIP']
+                            ],
+                            resize_keyboard: true
+                        }
+                    }
+                );
+
+                if (!subscription) {
+
+                    await incrementFreeRecipes(tgId);
+
+                    const newUsed = freeUsed + 1;
+
+                    if (newUsed >= FREE_LIMIT) {
+                        await sendSubscriptionMenu(ctx);
+                    }
+                }
+
+            } catch (err) {
+
+                console.error(err);
+
+                await ctx.reply(
+                    `
+❌ Ошибка генерации рецепта
+
+${err.message}
+`
+                );
+            }
+        }
+    });
+
+    // =========================
+    // VIP MENU
+    // =========================
+    bot.command('weekmenu', async (ctx) => {
+
+        const subscription =
+            await hasSubscription(ctx.from.id);
+
+        if (
+            !subscription ||
+            subscription.plan_type !== 'VIP'
+        ) {
+            return ctx.reply(
+                '🔒 Только для VIP'
+            );
+        }
+
+        await ctx.reply(
+            `
+📅 Укажите:
+
+• Количество человек
+• Период
+• Тип питания
+`,
+            {
+                parse_mode: 'HTML'
+            }
+        );
+    });
+
+    // =========================
+    // DIET
+    // =========================
+    bot.command('diet', async (ctx) => {
+
+        const subscription =
+            await hasSubscription(ctx.from.id);
+
+        if (
+            !subscription ||
+            subscription.plan_type !== 'VIP'
+        ) {
+            return ctx.reply(
+                '🔒 Только для VIP'
+            );
+        }
+
+        await ctx.reply(
+            `
+🥗 Укажите:
+
+• Рост
+• Вес
+• Возраст
+• Цель
+`,
+            {
+                parse_mode: 'HTML'
+            }
+        );
+    });
 };
